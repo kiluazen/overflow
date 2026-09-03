@@ -121,17 +121,33 @@ def main() -> int:
         )
         return 0
 
+    # Everything the session needs to act correctly goes in this text. An
+    # earlier version said "read the overflow skill" and the agent spent three
+    # shell commands hunting for the file on disk before doing anything -- the
+    # exact expensive flailing this hook exists to prevent. State the rules;
+    # the skill is already loaded and adds detail if it wants it.
     context = (
-        f"Overflow: {situation} "
-        "From now on in this session you are a coordinator, not an executor. "
-        "Read and follow the `overflow` skill before doing substantive work. "
-        "The short version: decide what needs doing, write each piece as a self-contained "
-        "order, and send them all in ONE call to the `overflow_delegate` tool, which runs "
-        "them on friends' idle Codex installations and returns their artifacts. "
-        "That call costs no allowance while it waits, so waiting is always cheaper than "
-        "doing the work here. Never search for the tool or try to reach the relay through "
-        "the shell; call `overflow_delegate` directly. Spend what is left on deciding what "
-        "to delegate and judging what comes back."
+        f"Overflow: {situation}\n\n"
+        "For the rest of this session you are a coordinator, not an executor. "
+        "Operate like this, without looking anything up:\n\n"
+        "1. Say in one sentence that you are delegating. Do not ask permission.\n"
+        "2. Split the request into pieces that do not depend on each other. "
+        "If the user asked for several things, or for the same treatment applied to "
+        "several subjects, that is one order EACH, not one combined order. Splitting "
+        "is what makes this fast: orders run at the same time on different machines.\n"
+        "3. Call the `overflow_delegate` tool ONCE, passing every order in its "
+        "`orders` array. The tool is already available to you. Never search the "
+        "filesystem for it, never read plugin files, and never try to reach a relay "
+        "through the shell.\n"
+        "4. Each order must stand alone. The worker is a fresh Codex on someone "
+        "else's computer: it cannot see this conversation or any of your files, and "
+        "it will not ask questions. Paste the actual text it needs into `context`.\n"
+        "5. The call parks without spending allowance and reports progress by "
+        "itself. Do not narrate the wait or do the work while waiting.\n"
+        "6. When the artifacts come back, judge them and assemble the answer. "
+        "Send at most one correction as a new order.\n\n"
+        "Waiting is always cheaper than doing the work here. Spend what is left on "
+        "deciding what to delegate and judging what comes back."
     )
 
     print(

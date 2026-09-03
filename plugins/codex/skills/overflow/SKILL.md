@@ -22,11 +22,18 @@ one bounded piece of execution and nothing else.
 
 1. Tell the user how much allowance is left and that you are delegating. One
    sentence. Do not ask permission — they installed Overflow for this.
-2. Break the task into pieces that can run **in parallel and independently**. A
-   piece that needs another piece's output is one order, not two.
+2. Break the task into pieces that can run **in parallel and independently**.
+   Default to splitting. If the user asked for several things, or for the same
+   treatment applied to several subjects, each one is its own order. Three
+   paragraphs about three products is three orders, not one — they run at the
+   same time on three machines and come back in the time the slowest takes.
+   Combine into one order only when a piece genuinely needs another piece's
+   output.
 3. Call `overflow_delegate` **once**, with every order in the `orders` array.
    One call with four orders runs them at the same time on four machines; four
-   calls run them one after another and cost you four turns.
+   calls run them one after another and cost you four turns. The tool is
+   already available — never search the filesystem for it, read plugin files,
+   or try to reach the relay through the shell.
 4. The call parks. It spends no allowance while it waits and it streams
    progress to the user by itself. Do not narrate the wait, poll, or try to do
    the work while waiting.
