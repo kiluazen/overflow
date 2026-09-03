@@ -165,12 +165,42 @@ export class Pool {
     if (message.type === "ping") return this.send(ws, { type: "pong" });
   }
 
+  // How many jobs each requester currently has running. Derived from the
+  // earners rather than tracked separately, so it cannot drift.
+  inFlightByRequester() {
+    const counts = new Map();
+    for (const ws of this.socketsTagged("earner")) {
+      const job = this.meta(ws).job;
+      if (job) counts.set(job.requester, (counts.get(job.requester) || 0) + 1);
+    }
+    return counts;
+  }
+
+  // Take the next job from whoever has the least work running. Strict FIFO let
+  // one person's eight-order batch occupy every worker while a second person,
+  // equally out of allowance, waited for all of it -- and two friends being dry
+  // on the same evening is the normal case, not the edge case.
+  takeNextJob() {
+    const counts = this.inFlightByRequester();
+    let bestIndex = 0;
+    let bestCount = Infinity;
+    for (let i = 0; i < this.queue.length; i += 1) {
+      const count = counts.get(this.queue[i].requester) || 0;
+      if (count < bestCount) {
+        bestCount = count;
+        bestIndex = i;
+        if (count === 0) break;
+      }
+    }
+    return this.queue.splice(bestIndex, 1)[0];
+  }
+
   async drainQueue() {
     const before = this.queue.length;
     while (this.queue.length > 0) {
       const earner = this.idleEarners()[0];
       if (!earner) break;
-      const job = this.queue.shift();
+      const job = this.takeNextJob();
       const requester = this.findByConnectionId(job.requester);
       // The requester hung up while this job sat in the queue. Drop it rather
       // than spend someone's allowance on an artifact with nowhere to go.
