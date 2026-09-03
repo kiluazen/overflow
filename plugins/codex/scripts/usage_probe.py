@@ -75,34 +75,72 @@ def read_rate_limits(timeout_seconds: float = 10.0) -> dict[str, Any]:
             proc.wait(timeout=2)
 
 
-def codex_bucket(result: dict[str, Any]) -> dict[str, Any]:
-    by_id = result.get("rateLimitsByLimitId") or {}
-    if isinstance(by_id, dict) and isinstance(by_id.get("codex"), dict):
-        return by_id["codex"]
-    fallback = result.get("rateLimits")
-    return fallback if isinstance(fallback, dict) else {}
-
-
-def summarize(result: dict[str, Any]) -> dict[str, Any]:
-    bucket = codex_bucket(result)
+def _worst_window(bucket: dict[str, Any]) -> dict[str, Any] | None:
+    """The window closest to its limit — the one that actually constrains you."""
     windows = [
         window
         for window in (bucket.get("primary"), bucket.get("secondary"))
-        if isinstance(window, dict) and isinstance(window.get("usedPercent"), (int, float))
+        if isinstance(window, dict)
+        and isinstance(window.get("usedPercent"), (int, float))
     ]
     if not windows:
-        raise RuntimeError("No Codex usage window with usedPercent was returned")
-    limiting_window = max(windows, key=lambda item: float(item["usedPercent"]))
-    used_percent = float(limiting_window["usedPercent"])
+        return None
+    return max(windows, key=lambda item: float(item["usedPercent"]))
+
+
+def _describe(bucket: dict[str, Any]) -> dict[str, Any] | None:
+    window = _worst_window(bucket)
+    if window is None:
+        return None
+    used = float(window["usedPercent"])
     return {
-        "limitId": bucket.get("limitId", "codex"),
-        "usedPercent": used_percent,
-        "remainingPercent": max(0.0, 100.0 - used_percent),
-        "windowDurationMins": limiting_window.get("windowDurationMins"),
-        "resetsAt": limiting_window.get("resetsAt"),
+        "limitId": bucket.get("limitId"),
+        "limitName": bucket.get("limitName"),
+        "usedPercent": used,
+        "remainingPercent": max(0.0, 100.0 - used),
+        "windowDurationMins": window.get("windowDurationMins"),
+        "resetsAt": window.get("resetsAt"),
         "rateLimitReachedType": bucket.get("rateLimitReachedType"),
         "planType": bucket.get("planType"),
     }
+
+
+def summarize(result: dict[str, Any]) -> dict[str, Any]:
+    """Describe the main allowance, and say what is left to fall back on.
+
+    Codex meters more than one bucket. The `codex` bucket covers the capable
+    models; smaller models such as Codex Spark are metered separately and
+    survive the main bucket running dry. So "out of allowance" does not mean
+    Codex stops -- it means you have been dropped onto whatever is left. That
+    is the moment Overflow exists for, and the message has to say so honestly
+    rather than claiming you have nothing.
+    """
+    by_id = result.get("rateLimitsByLimitId")
+    by_id = by_id if isinstance(by_id, dict) else {}
+
+    main_bucket = by_id.get("codex")
+    if not isinstance(main_bucket, dict):
+        fallback = result.get("rateLimits")
+        main_bucket = fallback if isinstance(fallback, dict) else {}
+
+    main = _describe(main_bucket)
+    if main is None:
+        raise RuntimeError("No Codex usage window with usedPercent was returned")
+
+    others = []
+    for limit_id, bucket in by_id.items():
+        if limit_id == "codex" or not isinstance(bucket, dict):
+            continue
+        described = _describe(bucket)
+        if described is not None:
+            others.append(described)
+    others.sort(key=lambda item: item["usedPercent"])
+
+    main["fallbacks"] = others
+    main["fallbackAvailable"] = any(
+        item["remainingPercent"] > 5.0 for item in others
+    )
+    return main
 
 
 if __name__ == "__main__":

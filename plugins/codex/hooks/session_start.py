@@ -86,14 +86,34 @@ def main() -> int:
     if remaining > trigger_at:
         return 0
 
+    # Codex meters the capable models and the small ones separately, so a dry
+    # main bucket leaves the user on a weaker model rather than stopping them.
+    # Say which it is: "you have 0% left" is false and reads like a bug when
+    # the session visibly keeps working.
+    fallbacks = usage.get("fallbacks") or []
+    usable = [f for f in fallbacks if f["remainingPercent"] > 5.0]
+    if usable:
+        best = max(usable, key=lambda item: item["remainingPercent"])
+        label = best.get("limitName") or best.get("limitId") or "a smaller model"
+        situation = (
+            f"Your main Codex allowance is {remaining:g}% remaining, so this session "
+            f"has been dropped onto {label}. Your friends' allowance has not been."
+        )
+        headline = f"Overflow: main allowance gone — you are on {label}."
+    else:
+        situation = (
+            f"Your Codex allowance is {remaining:g}% remaining and there is no "
+            "smaller model left to fall back on."
+        )
+        headline = f"Overflow: {remaining:g}% left."
+
     if not _paired():
         print(
             json.dumps(
                 {
                     "systemMessage": (
-                        f"Overflow: {remaining:g}% of your Codex allowance left, but Overflow "
-                        "is not paired yet. Run `overflow pair <relay-url> <invite-code>` to "
-                        "delegate to your pool."
+                        f"{headline} Overflow is not paired yet — run "
+                        "`overflow pair <relay-url> <invite-code>` to delegate to your pool."
                     )
                 },
                 separators=(",", ":"),
@@ -102,7 +122,7 @@ def main() -> int:
         return 0
 
     context = (
-        f"Overflow: this Codex account has {remaining:g}% of its allowance left. "
+        f"Overflow: {situation} "
         "From now on in this session you are a coordinator, not an executor. "
         "Read and follow the `overflow` skill before doing substantive work. "
         "The short version: decide what needs doing, write each piece as a self-contained "
@@ -117,10 +137,7 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "systemMessage": (
-                    f"Overflow: {remaining:g}% left — delegating this session's work to "
-                    "your pool."
-                ),
+                "systemMessage": f"{headline} Delegating this session's work to your pool.",
                 "hookSpecificOutput": {
                     "hookEventName": "SessionStart",
                     "additionalContext": context,
