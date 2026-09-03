@@ -1,52 +1,55 @@
 # Overflow
 
-**Less than 15% of your Codex allowance left? Overflow turns your session into an
-orchestrator.** It sends the work to friends whose Codex is idle and spends what
-you have left on directing and judging, so your work does not stop when your
-usage does.
+**Your Codex allowance runs out. Your friends' hasn't.**
 
-Waiting for a delegated job costs no allowance. Measured on Codex 0.144.1, a
-159-second park cost the same as a call that failed instantly — the model is
-suspended inside the tool call, not polled and not re-invoked.
+When your main Codex allowance is gone, Codex doesn't stop — it drops you onto a
+small model and you spend the rest of the week fighting it. Overflow turns that
+session into an orchestrator instead: it splits the work into orders, runs them
+on friends' idle Codex installations, and brings the results back into the same
+conversation.
 
-## Install
+Waiting costs you nothing. A delegated call suspends the session inside the tool
+call — measured on Codex 0.144.1, a 159-second wait cost the same as a call that
+failed instantly. You pay to decide what to delegate and to judge what comes
+back. That's it.
 
-In the ChatGPT desktop app: **Add plugin marketplace** → source `kiluazen/overflow`,
-sparse path `plugins/codex`. Or from a terminal:
+## Join a pool
+
+Someone gives you a relay URL and an invite code. Three steps:
 
 ```sh
 codex plugin marketplace add kiluazen/overflow
 codex plugin add overflow
 ```
 
-Then pair once with your pool:
-
 ```sh
-node ~/.codex/plugins/cache/*/overflow/*/scripts/earn.mjs pair <relay-url> <invite-code>
+node ~/.codex/.tmp/marketplaces/overflow/plugins/codex/scripts/earn.mjs pair <relay-url> <invite-code>
 ```
 
-## Using it
+In the ChatGPT desktop app it's **Add plugin marketplace** → source
+`kiluazen/overflow`, sparse path `plugins/codex`.
 
-**When you are nearly out**, do nothing. A session that starts below 15%
-remaining gets told to coordinate instead of execute. Ask for what you wanted;
-it packages the work, sends it out, shows progress while it waits, and judges
-what comes back.
+## Then two things happen by themselves
 
-**When you have allowance to spare**, put your machine in the pool:
+**When you're nearly out**, do nothing. A session that starts below 15%
+remaining is told to coordinate rather than execute. Ask for what you wanted; it
+writes the orders, sends them out, shows progress while it waits, and assembles
+the answer.
+
+**When you have allowance spare**, put your machine in the pool:
 
 ```sh
 node <plugin>/scripts/earn.mjs
 ```
 
-It holds one socket open, runs one job at a time on your Codex login, and stops
-when you stop it. No daemon, nothing installed in the background, and no
-duration budget — it does not quietly expire after thirty minutes.
+One socket, one job at a time, on your own Codex login. No daemon, nothing
+installed in the background, no duration budget — it does not quietly expire
+after thirty minutes. It stops when you stop it.
 
-## Running the relay
+## Run your own relay
 
-The relay is a Cloudflare Worker with one Durable Object. Earners and requesters
-both hold hibernatable WebSockets, so nobody polls and an idle pool costs
-almost nothing.
+One Cloudflare Worker with a single Durable Object. Both sides hold hibernatable
+WebSockets, so nobody polls and an idle pool costs almost nothing.
 
 ```sh
 cd relay
@@ -57,40 +60,42 @@ wrangler deploy
 ## Layout
 
 ```
-plugins/codex/          the plugin (sparse path for the marketplace)
-  hooks/                SessionStart allowance check
+plugins/codex/          the plugin (the marketplace sparse path)
+  hooks/                allowance check at session start
   skills/overflow/      how to coordinate instead of execute
   mcp/server.mjs        overflow_delegate — parks, streams progress
-  scripts/earn.mjs      the earner, and `pair` / `status`
-relay/                  Cloudflare Worker + Durable Object job board
+  scripts/earn.mjs      the earner, plus pair / status
+relay/                  Worker + Durable Object job board
 ```
 
-## Three settings that are not optional
+## Four settings that are not optional
 
-Codex silently misbehaves without each of these, so they ship in
+Codex misbehaves quietly without each of these, so they ship in
 `plugins/codex/.mcp.json`:
 
 - `tools.overflow_delegate.approval_mode = "auto"` — without it the call is
-  cancelled before the server receives it, and the user is told *they*
+  cancelled before the server ever receives it, and the user is told *they*
   cancelled it.
+- `omit_tools_from: ["deferred", ...]` — Codex hides MCP tools behind tool-search
+  by default. A session that has to hunt for the tool either burns shell
+  commands finding it or skips it, announces it delegated, and writes the answer
+  itself.
 - `tool_timeout_sec` — the default is far shorter than a real job.
 - `env_vars` — Codex does not pass the parent shell's environment to MCP
   servers. Anything inherited from a login shell arrives undefined.
 
-## Status
+## What's been verified
 
-Verified against a deployed relay, from a plugin installed the way a friend
-installs it (`codex plugin marketplace add kiluazen/overflow`):
+Against the deployed relay, from a plugin installed the way you'd install it:
 
-- a real Codex session calls `overflow_delegate` and is not cancelled, which
-  confirms a plugin's bundled `.mcp.json` can carry `approval_mode`
-- two orders in one call fan out and come back correctly attributed
-- the pool refuses to park when no workers are online, in 0.1s
-- a worker that disconnects mid-job fails that order instead of hanging its
-  requester
-- the SessionStart hook produces orchestration context when paired, and a
-  pairing nudge when not
+- a real low-allowance session splits a four-part request into four parallel
+  orders and delegates them in one call, with zero shell commands
+- six orders with 3.6 KB of context each, across two workers, return 6/6
+- a batch that runs out of time keeps the artifacts that came back and names the
+  ones that didn't, and the orchestrator re-delegates only those
+- an empty pool refuses to park, in 0.1s
+- a worker that dies mid-job fails that order instead of hanging its requester
+- workers dropped by a relay deploy reconnect on their own within seconds
 
-Not yet verified: a friend on a second machine; Esc during a park; and whether
-a freshly installed plugin's hook needs a one-time trust approval before it
-fires.
+Not yet verified: two people on two machines with two different accounts, and
+Esc during a park.
