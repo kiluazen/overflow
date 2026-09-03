@@ -1,10 +1,8 @@
 {
   "mcpServers": {
     "overflow": {
-      "command": "node",
-      "args": [
-        "./mcp/server.mjs"
-      ],
+      "command": "./mcp/launch.sh",
+      "args": [],
       "cwd": ".",
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 3600,
@@ -16,7 +14,8 @@
         "PLUGIN_DATA",
         "OVERFLOW_RELAY",
         "OVERFLOW_TOKEN",
-        "OVERFLOW_NAME"
+        "OVERFLOW_NAME",
+        "OVERFLOW_NODE"
       ],
       "tools": {
         "overflow_delegate": {

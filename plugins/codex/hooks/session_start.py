@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 
@@ -37,6 +38,31 @@ def _append_event(event: dict[str, Any]) -> None:
     except OSError:
         # Losing the log must never cost the user a session.
         pass
+
+
+def _node_missing() -> bool:
+    """True when the delegate tool will not be able to start.
+
+    The MCP server needs node, and Codex hands MCP servers a trimmed
+    environment. When node cannot be found the server never starts and the tool
+    is simply absent -- which the session can only report as "I cannot delegate".
+    Say so here, where the user can still act on it.
+    """
+    launcher = Path(
+        os.environ.get("PLUGIN_ROOT", Path(__file__).parents[1])
+    ) / "mcp" / "launch.sh"
+    if not launcher.exists():
+        return False
+    try:
+        result = subprocess.run(
+            ["/bin/sh", str(launcher), "--check-node"],
+            input="",
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 127
 
 
 def _paired() -> bool:
@@ -106,6 +132,21 @@ def main() -> int:
             "smaller model left to fall back on."
         )
         headline = f"Overflow: {remaining:g}% left."
+
+    if _node_missing():
+        print(
+            json.dumps(
+                {
+                    "systemMessage": (
+                        f"{headline} Overflow cannot start: node was not found. "
+                        "Install Node 22+, or set OVERFLOW_NODE to its path, or "
+                        "delegation will be unavailable this session."
+                    )
+                },
+                separators=(",", ":"),
+            )
+        )
+        return 0
 
     if not _paired():
         print(
