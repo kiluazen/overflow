@@ -79,9 +79,18 @@ Codex silently misbehaves without each of these, so they ship in
 
 ## Status
 
-Verified end to end on a local relay: empty-pool refusal, fan-out across two
-workers with queueing, correct ordering and attribution, worker-disconnect
-returning a failure instead of hanging, and a real `codex exec` worker returning
-a correct artifact in 12 seconds.
+Verified against a deployed relay, from a plugin installed the way a friend
+installs it (`codex plugin marketplace add kiluazen/overflow`):
 
-Not yet verified: a friend on a second machine, and Esc during a park.
+- a real Codex session calls `overflow_delegate` and is not cancelled, which
+  confirms a plugin's bundled `.mcp.json` can carry `approval_mode`
+- two orders in one call fan out and come back correctly attributed
+- the pool refuses to park when no workers are online, in 0.1s
+- a worker that disconnects mid-job fails that order instead of hanging its
+  requester
+- the SessionStart hook produces orchestration context when paired, and a
+  pairing nudge when not
+
+Not yet verified: a friend on a second machine; Esc during a park; and whether
+a freshly installed plugin's hook needs a one-time trust approval before it
+fires.
