@@ -98,7 +98,7 @@ async function poolStatus({ relay, token }) {
 
 // Park until every order is answered. Resolves with one entry per order, in the
 // order they were submitted.
-function delegate(orders, cfg, progressToken, timeoutSeconds) {
+function delegate(orders, cfg, progressToken, timeoutSeconds, pool) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(
       socketUrl(cfg.relay, "/delegate", cfg.token, cfg.name),
@@ -133,18 +133,32 @@ function delegate(orders, cfg, progressToken, timeoutSeconds) {
       error ? reject(error) : resolve(value);
     };
 
+    // A batch that runs out of time keeps whatever came back. Throwing here
+    // would discard finished artifacts the pool already spent allowance
+    // producing, and the orchestrator would have no way to recover them.
     const timer = setTimeout(() => {
-      finish(
-        new Error(
-          `Only ${done} of ${orders.length} orders came back within ${timeoutSeconds}s. ` +
-            `Delegate again or do the rest locally.`,
-        ),
-      );
+      if (done === 0) {
+        finish(
+          new Error(
+            `No orders came back within ${timeoutSeconds}s. The pool may be busy; ` +
+              `try again with fewer orders or a longer timeoutSeconds.`,
+          ),
+        );
+        return;
+      }
+      finish(null, artifacts);
     }, timeoutSeconds * 1000);
 
     socket.addEventListener("open", () => {
       socket.send(JSON.stringify({ type: "submit", orders }));
-      notify(`submitted ${orders.length} order(s)`);
+      // Orders outnumbering workers is the usual reason a batch feels slow, so
+      // say it up front instead of letting it look like a stall.
+      const workers = pool?.earners ?? 0;
+      notify(
+        orders.length > workers
+          ? `submitted ${orders.length} orders to ${workers} worker(s) — some will queue`
+          : `submitted ${orders.length} order(s) to ${workers} worker(s)`,
+      );
     });
 
     socket.addEventListener("message", (event) => {
@@ -182,21 +196,26 @@ function delegate(orders, cfg, progressToken, timeoutSeconds) {
     });
 
     socket.addEventListener("close", () => {
-      if (done < orders.length) {
-        finish(
-          new Error(
-            `Relay closed the connection after ${done} of ${orders.length} orders.`,
-          ),
-        );
+      if (done === 0) {
+        finish(new Error("The relay closed the connection before any order ran."));
+        return;
       }
+      if (done < orders.length) finish(null, artifacts);
     });
   });
 }
 
 function renderArtifacts(orders, artifacts) {
-  return artifacts
+  const missing = artifacts
+    .map((entry, index) => (entry ? null : index + 1))
+    .filter((index) => index !== null);
+
+  const body = artifacts
     .map((entry, index) => {
       const header = `## Order ${index + 1}: ${orders[index].objective}`;
+      if (!entry) {
+        return `${header}\n_NOT RETURNED — no worker completed this order._`;
+      }
       const attribution =
         entry.status === "completed"
           ? `_returned by ${entry.worker}_`
@@ -204,6 +223,14 @@ function renderArtifacts(orders, artifacts) {
       return `${header}\n${attribution}\n\n${entry.artifact}`;
     })
     .join("\n\n---\n\n");
+
+  if (missing.length === 0) return body;
+  return (
+    `**${artifacts.length - missing.length} of ${artifacts.length} orders came back.** ` +
+    `Order(s) ${missing.join(", ")} did not. Keep what returned and either ` +
+    `delegate only the missing order(s) again or do those locally — do not ` +
+    `re-run the ones below.\n\n${body}`
+  );
 }
 
 async function callDelegate(params) {
@@ -245,6 +272,7 @@ async function callDelegate(params) {
     cfg,
     params._meta?.progressToken,
     timeoutSeconds,
+    status,
   );
 
   return {
@@ -252,6 +280,7 @@ async function callDelegate(params) {
     structuredContent: {
       delegated: true,
       orders: orders.length,
+      returned: artifacts.filter(Boolean).length,
       results: artifacts,
     },
   };
