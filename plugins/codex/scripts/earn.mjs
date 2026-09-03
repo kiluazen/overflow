@@ -15,6 +15,23 @@ import { spawn } from "node:child_process";
 
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
+// Cloudflare drops a WebSocket message over 1 MiB. An artifact past that limit
+// vanishes between here and the requester with no error on either side: this
+// process reports success, and the requester waits out its whole timeout and is
+// told the pool is busy. Cap it here, where we can still say what happened.
+const MAX_ARTIFACT_BYTES = 600_000;
+
+function capArtifact(artifact) {
+  if (Buffer.byteLength(artifact, "utf8") <= MAX_ARTIFACT_BYTES) return artifact;
+  const kept = Buffer.from(artifact, "utf8")
+    .subarray(0, MAX_ARTIFACT_BYTES)
+    .toString("utf8");
+  return (
+    `${kept}\n\n---\n[Overflow truncated this artifact: it exceeded the ` +
+    `${Math.round(MAX_ARTIFACT_BYTES / 1000)} KB a worker can return. Ask for a ` +
+    `shorter artifact, or split the order.]`
+  );
+}
 
 function dataDir() {
   return process.env.PLUGIN_DATA
@@ -122,7 +139,7 @@ function runOrder(order) {
       cleanup();
       resolve(
         code === 0 && artifact
-          ? { status: "completed", artifact }
+          ? { status: "completed", artifact: capArtifact(artifact) }
           : {
               status: "failed",
               artifact:
