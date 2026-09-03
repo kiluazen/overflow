@@ -52,10 +52,20 @@ export class Pool {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    // Jobs waiting for a free earner. Kept in memory: a queued job whose
-    // requester has gone away is worthless, and every requester is a live
-    // socket, so nothing here needs to survive an eviction.
+    // Jobs waiting for a free earner. This MUST be durable. Hibernation is the
+    // whole reason an idle pool is cheap, and the DO hibernates precisely when
+    // it is most likely to be holding a queue: every worker busy, nothing
+    // arriving. An in-memory queue silently lost every order waiting behind a
+    // busy worker, which looked like orders that were submitted and simply
+    // never ran.
     this.queue = [];
+    this.state.blockConcurrencyWhile(async () => {
+      this.queue = (await this.state.storage.get("queue")) || [];
+    });
+  }
+
+  async saveQueue() {
+    await this.state.storage.put("queue", this.queue);
   }
 
   async fetch(request) {
@@ -143,6 +153,7 @@ export class Pool {
           order,
         });
       }
+      await this.saveQueue();
       this.send(ws, { type: "accepted", batch, count: orders.length });
       return this.drainQueue();
     }
@@ -154,15 +165,17 @@ export class Pool {
     if (message.type === "ping") return this.send(ws, { type: "pong" });
   }
 
-  drainQueue() {
+  async drainQueue() {
+    const before = this.queue.length;
     while (this.queue.length > 0) {
       const earner = this.idleEarners()[0];
-      if (!earner) return;
+      if (!earner) break;
       const job = this.queue.shift();
       const requester = this.findByConnectionId(job.requester);
       // The requester hung up while this job sat in the queue. Drop it rather
       // than spend someone's allowance on an artifact with nowhere to go.
       if (!requester) continue;
+
 
       const earnerMeta = this.meta(earner);
       // Only the routing fields go into the attachment. A socket attachment is
@@ -189,9 +202,10 @@ export class Pool {
         worker: earnerMeta.name,
       });
     }
+    if (this.queue.length !== before) await this.saveQueue();
   }
 
-  completeJob(ws, message) {
+  async completeJob(ws, message) {
     const meta = this.meta(ws);
     const job = meta.job && meta.job.id === message.id ? meta.job : null;
     this.setMeta(ws, { busy: false, job: null });
@@ -210,7 +224,7 @@ export class Pool {
         });
       }
     }
-    this.drainQueue();
+    await this.drainQueue();
   }
 
   findByConnectionId(connectionId) {
@@ -237,9 +251,11 @@ export class Pool {
       }
     }
     if (meta.role === "requester") {
+      const before = this.queue.length;
       this.queue = this.queue.filter((job) => job.requester !== meta.connectionId);
+      if (this.queue.length !== before) await this.saveQueue();
     }
-    this.drainQueue();
+    await this.drainQueue();
   }
 
   async webSocketError(ws) {
