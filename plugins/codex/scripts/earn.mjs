@@ -65,6 +65,10 @@ function writeConfig(next) {
   });
 }
 
+function networkAllowed() {
+  return process.env.OVERFLOW_WORKER_NETWORK === "1";
+}
+
 function log(message) {
   process.stdout.write(`${new Date().toTimeString().slice(0, 8)}  ${message}\n`);
 }
@@ -104,6 +108,11 @@ function runOrder(order) {
       "-C", workdir,
       "-s", "workspace-write",
       "-c", 'approval_policy="never"',
+      // Off unless this machine's owner opts in. workspace-write blocks network
+      // by default, and leaving it that way means an order cannot post anything
+      // it reads on this machine to the outside world -- it can only put it in
+      // the artifact, which goes back to one known person in the pool.
+      "-c", `sandbox_workspace_write.network_access=${networkAllowed()}`,
       "-o", outputPath,
       prompt,
     ];
@@ -165,7 +174,12 @@ function connect(cfg, state) {
 
   socket.addEventListener("open", () => {
     state.backoff = RECONNECT_MIN_MS;
-    log(`connected to the pool as "${cfg.name}" — waiting for work (ctrl-c to stop)`);
+    log(
+      `connected to the pool as "${cfg.name}" — waiting for work (ctrl-c to stop)` +
+        (networkAllowed()
+          ? "\n          network access is ON for jobs (OVERFLOW_WORKER_NETWORK=1)"
+          : "\n          jobs run with no network access"),
+    );
   });
 
   socket.addEventListener("message", async (event) => {

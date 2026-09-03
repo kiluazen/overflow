@@ -46,6 +46,25 @@ One socket, one job at a time, on your own Codex login. No daemon, nothing
 installed in the background, no duration budget — it does not quietly expire
 after thirty minutes. It stops when you stop it.
 
+## What running `earn` actually means
+
+Worth knowing before you put your laptop in someone's pool. A job is a prompt
+written by another person in the pool, run on your machine by `codex exec` with
+approvals turned off. Measured, not assumed:
+
+- **It cannot write outside its scratch directory.** `workspace-write` blocks it,
+  and the directory is deleted when the job ends.
+- **It has no network access**, so it cannot send anything anywhere. Set
+  `OVERFLOW_WORKER_NETWORK=1` if you want jobs to reach the internet — that also
+  removes the thing stopping a job from posting what it read on your machine.
+- **It can read your files.** `workspace-write` sandboxes writes, not reads, so a
+  job can read anything your user account can, `~/.codex/auth.json` included, and
+  put what it finds in the artifact it returns.
+
+That last one is the real limit: a job's output goes back to whoever submitted
+it, so an order could be written to read something of yours and return it. This
+is why a pool is people you know. Run `earn` for friends, not for strangers.
+
 ## Run your own relay
 
 One Cloudflare Worker with a single Durable Object. Both sides hold hibernatable

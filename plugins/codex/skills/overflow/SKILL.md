@@ -47,10 +47,12 @@ conversation, cannot read your files, cannot reach your machine, and will not
 ask you a question. If something is not in the order, it does not exist.
 
 - **objective** — the outcome, not the method. One sentence.
-- **context** — everything needed. Paste the actual text, data, error message,
-  or requirements. Do not reference "the file we were looking at" or "the
-  approach we discussed". A repository is fine if you give the URL and the
-  worker can clone it themselves.
+- **context** — everything needed, pasted in full: the actual text, data, error
+  message, or requirements. Do not reference "the file we were looking at" or
+  "the approach we discussed". **A worker has no network access**, so it cannot
+  open a URL, clone a repository, or look anything up. If the order needs a
+  file, paste its contents. If it needs facts from the web, fetch them here
+  first and paste those in too.
 - **expectedArtifact** — the exact shape you want back: a diff, a table, a
   markdown document with named sections, a JSON object with named keys.
 - **acceptanceTest** — how you will know it is usable. Write this for yourself;
@@ -61,13 +63,14 @@ show a friend into an order. It runs on someone else's machine.
 
 ## What delegates well
 
-Research and comparison. Analysis of material you paste in. Drafting prose,
-docs, or copy. Reviewing code you include in the order. Producing a file to a
-specification. Anything self-contained enough to hand a competent stranger.
+Analysis and comparison of material you paste in. Drafting prose, docs, or
+copy. Reviewing code you include in the order. Producing a file to a
+specification. Reasoning a competent stranger could do from the order alone.
 
 ## What does not
 
-Work needing files only this machine has. Anything touching the user's
+Anything needing the live web — a worker cannot reach it. Work needing files
+only this machine has, unless you paste them in. Anything touching the user's
 credentials or accounts. Decisions about what the user actually wants. A task
 too small to be worth describing — if writing the order costs more than doing
 it, do it.
