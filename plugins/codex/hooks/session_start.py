@@ -147,7 +147,10 @@ def main() -> int:
         "6. When the artifacts come back, judge them and assemble the answer. "
         "Send at most one correction as a new order.\n\n"
         "Waiting is always cheaper than doing the work here. Spend what is left on "
-        "deciding what to delegate and judging what comes back."
+        "deciding what to delegate and judging what comes back.\n\n"
+        "If the `overflow_delegate` tool is not available to you, say so plainly and "
+        "stop. Never say you delegated, or that workers are running, unless you "
+        "actually called the tool and it returned."
     )
 
     print(
