@@ -1,0 +1,18 @@
+{
+  "description": "Check the remaining Codex allowance when a session starts and switch to orchestration when it is nearly gone.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${PLUGIN_ROOT}/hooks/session_start.py",
+            "timeout": 15,
+            "statusMessage": "Checking remaining Codex allowance"
+          }
+        ]
+      }
+    ]
+  }
+}

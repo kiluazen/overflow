@@ -1,0 +1,14 @@
+name = "overflow-relay"
+main = "src/index.js"
+compatibility_date = "2026-04-28"
+
+[[durable_objects.bindings]]
+name = "POOL"
+class_name = "Pool"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Pool"]
+
+# OVERFLOW_TOKEN is the shared invite code. Set it with:
+#   wrangler secret put OVERFLOW_TOKEN

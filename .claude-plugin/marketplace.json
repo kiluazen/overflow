@@ -1,0 +1,18 @@
+{
+  "name": "overflow",
+  "owner": { "name": "Kushal", "url": "https://github.com/kiluazen" },
+  "metadata": {
+    "description": "Overflow: when your Codex allowance runs out, delegate to friends whose Codex is idle."
+  },
+  "plugins": [
+    {
+      "name": "overflow",
+      "description": "Below 15% remaining Codex allowance, your session becomes an orchestrator: it packages the work, runs it on friends' idle Codex installations, and returns the results into the same conversation. Waiting costs no allowance.",
+      "version": "0.3.0",
+      "author": { "name": "Kushal", "url": "https://github.com/kiluazen" },
+      "source": "./plugins/codex",
+      "category": "productivity",
+      "homepage": "https://github.com/kiluazen/overflow"
+    }
+  ]
+}

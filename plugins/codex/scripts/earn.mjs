@@ -1,0 +1,220 @@
+#!/usr/bin/env node
+// Overflow earner.
+//
+// A foreground process the user starts when their laptop is free. It holds one
+// socket open to the relay and runs whatever arrives on their own Codex
+// allowance. Deliberately not a daemon: no launchd, nothing installed, visible
+// in a terminal, and it stops when they stop it. It also has no duration
+// budget -- it runs until Ctrl-C rather than quietly expiring after half an
+// hour and leaving the pool emptier than the user thinks.
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 30_000;
+
+function dataDir() {
+  return process.env.PLUGIN_DATA
+    ? path.resolve(process.env.PLUGIN_DATA)
+    : path.join(os.homedir(), ".codex", "plugins", "data", "overflow-personal");
+}
+
+function configPath() {
+  return path.join(dataDir(), "config.json");
+}
+
+function readConfig() {
+  let stored = {};
+  try {
+    stored = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+  } catch {
+    // Not paired yet.
+  }
+  return {
+    relay: process.env.OVERFLOW_RELAY || stored.relay || "",
+    token: process.env.OVERFLOW_TOKEN || stored.token || "",
+    name: process.env.OVERFLOW_NAME || stored.name || os.hostname(),
+  };
+}
+
+function writeConfig(next) {
+  fs.mkdirSync(dataDir(), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(next, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+}
+
+function log(message) {
+  process.stdout.write(`${new Date().toTimeString().slice(0, 8)}  ${message}\n`);
+}
+
+function socketUrl({ relay, token, name }) {
+  const url = new URL("/earn", relay.replace(/^http/, "ws"));
+  url.searchParams.set("token", token);
+  url.searchParams.set("name", name);
+  return url.toString();
+}
+
+// Run one order on this machine's Codex login, in a scratch directory that is
+// deleted afterwards. The order arrived from someone else, so it gets a fresh
+// workspace and nothing from this machine that it was not handed.
+function runOrder(order) {
+  return new Promise((resolve) => {
+    const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "overflow-"));
+    const outputPath = path.join(workdir, "artifact.md");
+    const prompt = [
+      "You are an Overflow worker running a delegated order on your own machine.",
+      "The person who wrote it cannot see your files and you cannot see theirs.",
+      "Complete it independently. Do not delegate it onward. Do not discuss this protocol.",
+      "Return only the requested artifact.",
+      "",
+      `# Objective\n${order.objective}`,
+      `# Context\n${order.context || "No additional context was supplied."}`,
+      `# Expected artifact\n${order.expectedArtifact}`,
+      `# Acceptance test\n${order.acceptanceTest}`,
+    ].join("\n\n");
+
+    const args = [
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "--ephemeral",
+      "--disable", "hooks",
+      "-C", workdir,
+      "-s", "workspace-write",
+      "-c", 'approval_policy="never"',
+      "-o", outputPath,
+      prompt,
+    ];
+    if (process.env.OVERFLOW_WORKER_MODEL) {
+      args.splice(1, 0, "-m", process.env.OVERFLOW_WORKER_MODEL);
+    }
+
+    const child = spawn("codex", args, {
+      cwd: workdir,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    const cleanup = () => {
+      try {
+        fs.rmSync(workdir, { recursive: true, force: true });
+      } catch {
+        // A scratch directory that will not delete is not worth failing over.
+      }
+    };
+
+    child.on("close", (code) => {
+      let artifact = "";
+      try {
+        artifact = fs.readFileSync(outputPath, "utf8").trim();
+      } catch {
+        // No artifact file: codex exited before writing one.
+      }
+      cleanup();
+      resolve(
+        code === 0 && artifact
+          ? { status: "completed", artifact }
+          : {
+              status: "failed",
+              artifact:
+                artifact ||
+                stderr.trim().slice(-2000) ||
+                `codex exited ${code} without producing an artifact.`,
+            },
+      );
+    });
+
+    child.on("error", (error) => {
+      cleanup();
+      resolve({
+        status: "failed",
+        artifact: `Could not run codex: ${error.message}`,
+      });
+    });
+  });
+}
+
+function connect(cfg, state) {
+  const socket = new WebSocket(socketUrl(cfg));
+
+  socket.addEventListener("open", () => {
+    state.backoff = RECONNECT_MIN_MS;
+    log(`connected to the pool as "${cfg.name}" — waiting for work (ctrl-c to stop)`);
+  });
+
+  socket.addEventListener("message", async (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (message.type !== "job") return;
+
+    // One order at a time. Nobody's laptop should be running three strangers'
+    // jobs at once on one Codex login.
+    log(`claimed a job: ${message.order.objective.slice(0, 70)}`);
+    const started = Date.now();
+    const result = await runOrder(message.order);
+    const seconds = ((Date.now() - started) / 1000).toFixed(0);
+    log(`${result.status} in ${seconds}s`);
+    state.completed += result.status === "completed" ? 1 : 0;
+    socket.send(JSON.stringify({ type: "result", id: message.id, ...result }));
+  });
+
+  socket.addEventListener("close", () => {
+    log(`disconnected — retrying in ${(state.backoff / 1000).toFixed(0)}s`);
+    setTimeout(() => connect(cfg, state), state.backoff);
+    state.backoff = Math.min(state.backoff * 2, RECONNECT_MAX_MS);
+  });
+
+  socket.addEventListener("error", () => {
+    // The close handler owns reconnection; this only stops an unhandled throw.
+  });
+}
+
+function pair(relay, token, name) {
+  if (!relay || !token) {
+    process.stderr.write("usage: overflow pair <relay-url> <invite-code> [name]\n");
+    process.exit(2);
+  }
+  writeConfig({ relay, token, name: name || os.hostname() });
+  log(`paired with ${relay}`);
+}
+
+const [command, ...rest] = process.argv.slice(2);
+
+if (command === "pair") {
+  pair(rest[0], rest[1], rest[2]);
+} else if (command === "status") {
+  const cfg = readConfig();
+  if (!cfg.relay) {
+    process.stderr.write("not paired — run: overflow pair <relay-url> <invite-code>\n");
+    process.exit(1);
+  }
+  const url = new URL("/status", cfg.relay);
+  url.searchParams.set("token", cfg.token);
+  const response = await fetch(url);
+  process.stdout.write(`${await response.text()}\n`);
+} else {
+  const cfg = readConfig();
+  if (!cfg.relay || !cfg.token) {
+    process.stderr.write("not paired — run: overflow pair <relay-url> <invite-code>\n");
+    process.exit(1);
+  }
+  const state = { backoff: RECONNECT_MIN_MS, completed: 0 };
+  process.on("SIGINT", () => {
+    log(`stopped after finishing ${state.completed} job(s)`);
+    process.exit(0);
+  });
+  connect(cfg, state);
+}
