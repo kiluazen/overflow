@@ -165,9 +165,20 @@ export class Pool {
       if (!requester) continue;
 
       const earnerMeta = this.meta(earner);
+      // Only the routing fields go into the attachment. A socket attachment is
+      // capped at 2 KB, and an order's context is routinely larger than that --
+      // storing the whole job made serializeAttachment throw on real work and
+      // tore down every socket on the DO, which surfaced to the requester as
+      // "the relay closed the connection". The order itself is already on its
+      // way to the earner and is never needed here again.
       this.setMeta(earner, {
         busy: true,
-        jobs: { ...earnerMeta.jobs, [job.id]: job },
+        job: {
+          id: job.id,
+          batch: job.batch,
+          index: job.index,
+          requester: job.requester,
+        },
       });
       this.send(earner, { type: "job", id: job.id, order: job.order });
       this.send(requester, {
@@ -182,8 +193,8 @@ export class Pool {
 
   completeJob(ws, message) {
     const meta = this.meta(ws);
-    const job = (meta.jobs || {})[message.id];
-    this.setMeta(ws, { busy: false, jobs: {} });
+    const job = meta.job && meta.job.id === message.id ? meta.job : null;
+    this.setMeta(ws, { busy: false, job: null });
 
     if (job) {
       const requester = this.findByConnectionId(job.requester);
@@ -209,19 +220,21 @@ export class Pool {
   async webSocketClose(ws) {
     const meta = this.meta(ws);
     // An earner that disappears mid-job leaves its requester parked forever, so
-    // fail those jobs explicitly rather than letting the park time out.
-    for (const job of Object.values(meta.jobs || {})) {
+    // fail that job explicitly rather than letting the park time out.
+    const job = meta.job;
+    if (job) {
       const requester = this.findByConnectionId(job.requester);
-      if (!requester) continue;
-      this.send(requester, {
-        type: "result",
-        job: job.id,
-        index: job.index,
-        batch: job.batch,
-        status: "failed",
-        artifact: `Worker ${meta.name} disconnected before returning this order.`,
-        worker: meta.name,
-      });
+      if (requester) {
+        this.send(requester, {
+          type: "result",
+          job: job.id,
+          index: job.index,
+          batch: job.batch,
+          status: "failed",
+          artifact: `Worker ${meta.name} disconnected before returning this order.`,
+          worker: meta.name,
+        });
+      }
     }
     if (meta.role === "requester") {
       this.queue = this.queue.filter((job) => job.requester !== meta.connectionId);
