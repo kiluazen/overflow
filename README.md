@@ -95,10 +95,13 @@ Codex misbehaves quietly without each of these, so they ship in
 - `tools.overflow_delegate.approval_mode = "auto"` — without it the call is
   cancelled before the server ever receives it, and the user is told *they*
   cancelled it.
-- `omit_tools_from: ["deferred", ...]` — Codex hides MCP tools behind tool-search
-  by default. A session that has to hunt for the tool either burns shell
-  commands finding it or skips it, announces it delegated, and writes the answer
-  itself.
+- **Tool search, named explicitly.** Codex defers MCP tools, so
+  `overflow_delegate` is not in the model's immediate tool list — it must be
+  loaded through tool search. An orchestrator that doesn't know this reports the
+  tool missing and delegates nothing while the server runs fine. The
+  instructions have to name tool search, and separately forbid hunting on the
+  filesystem: they are two different searches, and conflating them costs you
+  either way.
 - `tool_timeout_sec` — the default is far shorter than a real job.
 - `env_vars` — Codex does not pass the parent shell's environment to MCP
   servers. Anything inherited from a login shell arrives undefined.
@@ -107,8 +110,10 @@ Codex misbehaves quietly without each of these, so they ship in
 
 Against the deployed relay, from a plugin installed the way you'd install it:
 
-- a real low-allowance session splits a four-part request into four parallel
-  orders and delegates them in one call, with zero shell commands
+- a real low-allowance session, from a clean marketplace install, splits a
+  release-notes request into four parallel orders, delegates in one call, gets
+  4/4 back from two real Codex workers, and assembles the answer — zero shell
+  commands
 - six orders with 3.6 KB of context each, across two workers, return 6/6
 - a batch that runs out of time keeps the artifacts that came back and names the
   ones that didn't, and the orchestrator re-delegates only those
