@@ -1,17 +1,22 @@
 {
   "name": "overflow",
-  "version": "0.3.0",
-  "description": "When your Codex allowance is nearly gone, delegate the work to friends whose Codex is idle and spend what is left on directing and judging.",
-  "author": { "name": "Kushal" },
+  "version": "0.3.0+codex.20260904102301",
+  "description": "Below 10% Codex allowance, delegate work to friends running visible Overflow earning tasks.",
+  "author": {
+    "name": "Kushal"
+  },
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Overflow",
     "shortDescription": "Keep working when Codex is nearly out.",
-    "longDescription": "Overflow checks your remaining Codex allowance when a session starts. Below 15% it turns the session into an orchestrator: it packages the work, sends it to friends whose Codex is idle, and returns their results into the same conversation. Waiting costs no allowance. Run `overflow earn` to put your own idle Codex into a friend's pool.",
+    "longDescription": "Overflow checks your main Codex allowance when a session starts. Below 10% it makes the session coordinate and delegate instead of exhausting itself. A friend opens a visible task and runs /earn; that task claims the order, renames itself, performs the work on screen, and returns the artifact to the original conversation.",
     "developerName": "Kushal",
     "category": "Productivity",
-    "capabilities": ["Delegation", "Orchestration"],
-    "defaultPrompt": "How much Codex allowance do I have left, and can this task be delegated?"
+    "capabilities": [
+      "Delegation",
+      "Orchestration"
+    ],
+    "defaultPrompt": "Use /work to delegate from this task, or /earn to take one queued Overflow task visibly."
   }
 }

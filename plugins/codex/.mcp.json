@@ -6,10 +6,6 @@
       "cwd": ".",
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 3600,
-      "omit_tools_from": [
-        "deferred",
-        "code_mode"
-      ],
       "env_vars": [
         "PLUGIN_DATA",
         "OVERFLOW_RELAY",
@@ -19,6 +15,12 @@
       ],
       "tools": {
         "overflow_delegate": {
+          "approval_mode": "auto"
+        },
+        "overflow_claim": {
+          "approval_mode": "auto"
+        },
+        "overflow_return": {
           "approval_mode": "auto"
         }
       }

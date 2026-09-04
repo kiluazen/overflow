@@ -1,70 +1,31 @@
 #!/usr/bin/env node
-// Overflow delegation tool.
+// Overflow's MCP server is only a broker. It never starts Codex itself.
 //
-// One call carries every order the orchestrator wants done, opens a socket to
-// the relay, and parks until the artifacts come back. Parking is the whole
-// point: a suspended tool call burns no allowance, which is what makes this
-// usable by a session that has almost none left. Measured on Codex 0.144.1, a
-// 159-second park cost the same as a call that failed instantly.
-//
-// Progress is streamed as notifications/progress while parked, so the user sees
-// the work moving without the model being woken to tell them.
+// Requester session: overflow_delegate parks while visible earning sessions work.
+// Earner session: overflow_claim parks until one order arrives, returns that order
+// into the current visible conversation, and overflow_return sends its artifact
+// back to the requester.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
-import {
-  DEFAULT_RELAY,
-  connect as joinPool,
-  readConfig,
-  writeConfig,
-  RECONNECT_MIN_MS,
-} from "../lib/earner.mjs";
+import { dataDir, readConfig, writeConfig } from "../lib/config.mjs";
 
-const TOOL = "overflow_delegate";
-const PAIR_TOOL = "overflow_join";
+const DELEGATE_TOOL = "overflow_delegate";
+const CLAIM_TOOL = "overflow_claim";
+const RETURN_TOOL = "overflow_return";
+const JOIN_TOOL = "overflow_join";
 const STATUS_TOOL = "overflow_pool";
-
-// Whether this session is also carrying work for other people. Codex starts this
-// server at session start and keeps it alive for the session, so joining the
-// pool here means a friend never runs anything: they install the plugin, and
-// their machine is available for as long as they have Codex open.
-let earning = false;
-// Set by the session-start hook's own reading of the account, passed through the
-// environment: below the trigger this machine is a requester, not a worker.
-const lowOnAllowance = process.env.OVERFLOW_LOW === "1";
-
-function startEarning() {
-  if (earning || process.env.OVERFLOW_EARN === "0") return false;
-  const cfg = readConfig();
-  if (!cfg.relay || !cfg.token) return false;
-  // A session that is itself about to delegate has no allowance to spare, so it
-  // joins as a requester only.
-  if (lowOnAllowance) return false;
-  earning = true;
-  // Several Codex windows means several of these; the suffix keeps them apart
-  // in the pool while still showing the person's name.
-  const name = `${cfg.name || os.hostname()}`;
-  joinPool({ ...cfg, name }, { backoff: RECONNECT_MIN_MS, completed: 0 });
-  return true;
-}
 const INVALID_PARAMS = -32602;
 const METHOD_NOT_FOUND = -32601;
+const MAX_ARTIFACT_BYTES = 600_000;
+const MAX_FILES = 4;
+const MAX_FILE_BYTES = 12_000_000;
 
-function dataDir() {
-  return process.env.PLUGIN_DATA
-    ? path.resolve(process.env.PLUGIN_DATA)
-    : path.join(os.homedir(), ".codex", "plugins", "data", "overflow-personal");
-}
+let pendingClaim = false;
+let activeClaim = null;
 
-// The relay URL and pool token are read from the environment the plugin's
-// .mcp.json declares, falling back to a file the user writes once. Codex does
-// not pass the parent shell's environment to MCP servers, so inheriting these
-// from a login shell silently yields undefined.
-// One source of truth with the earner: installing the plugin is joining, so a
-// machine with nothing configured is still a full member of the pool.
 function config() {
   return readConfig();
 }
@@ -95,6 +56,66 @@ function requireString(value, label) {
   return value.trim();
 }
 
+function safeFileName(value, index) {
+  const base = path.basename(typeof value === "string" ? value : "");
+  const cleaned = base.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : `artifact-${index + 1}`;
+}
+
+function mimeTypeFor(name) {
+  const extension = path.extname(name).toLowerCase();
+  if (extension === ".pptx") {
+    return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  }
+  if (extension === ".pdf") return "application/pdf";
+  if (extension === ".html") return "text/html";
+  if (extension === ".md") return "text/markdown";
+  return "application/octet-stream";
+}
+
+function readReturnFiles(rawFiles) {
+  if (rawFiles === undefined) return [];
+  if (!Array.isArray(rawFiles)) throw new Error("files must be an array");
+  if (rawFiles.length > MAX_FILES) throw new Error(`at most ${MAX_FILES} files can be returned`);
+
+  let total = 0;
+  return rawFiles.map((entry, index) => {
+    const rawPath = requireString(entry?.path, `files[${index}].path`);
+    const filePath = path.resolve(rawPath);
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) throw new Error(`${rawPath} is not a regular file`);
+    total += stat.size;
+    if (total > MAX_FILE_BYTES) {
+      throw new Error(`returned files exceed the ${MAX_FILE_BYTES} byte limit`);
+    }
+    const name = safeFileName(entry?.name || filePath, index);
+    return {
+      name,
+      mimeType: mimeTypeFor(name),
+      bytes: stat.size,
+      dataBase64: fs.readFileSync(filePath).toString("base64"),
+    };
+  });
+}
+
+function persistReturnedFiles(jobId, rawFiles) {
+  if (!Array.isArray(rawFiles) || rawFiles.length === 0) return [];
+  if (rawFiles.length > MAX_FILES) throw new Error("relay returned too many files");
+  const destination = path.join(dataDir(), "returns", jobId);
+  fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
+
+  let total = 0;
+  return rawFiles.map((entry, index) => {
+    const name = safeFileName(entry?.name, index);
+    const bytes = Buffer.from(requireString(entry?.dataBase64, `files[${index}].dataBase64`), "base64");
+    total += bytes.length;
+    if (total > MAX_FILE_BYTES) throw new Error("relay returned files over the size limit");
+    const filePath = path.join(destination, name);
+    fs.writeFileSync(filePath, bytes, { mode: 0o600 });
+    return { name, path: filePath, bytes: bytes.length, mimeType: entry?.mimeType || mimeTypeFor(name) };
+  });
+}
+
 function normalizeOrders(args) {
   const raw = Array.isArray(args.orders) ? args.orders : [args];
   if (raw.length === 0) throw new Error("Provide at least one order.");
@@ -121,8 +142,15 @@ async function poolStatus({ relay, token }) {
   return response.json();
 }
 
-// Park until every order is answered. Resolves with one entry per order, in the
-// order they were submitted.
+function notify(progressToken, progress, total, message) {
+  if (progressToken === undefined) return;
+  send({
+    jsonrpc: "2.0",
+    method: "notifications/progress",
+    params: { progressToken, progress, total, message },
+  });
+}
+
 function delegate(orders, cfg, progressToken, timeoutSeconds, pool) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(
@@ -132,57 +160,39 @@ function delegate(orders, cfg, progressToken, timeoutSeconds, pool) {
     let done = 0;
     let settled = false;
 
-    const notify = (message) => {
-      if (progressToken === undefined) return;
-      send({
-        jsonrpc: "2.0",
-        method: "notifications/progress",
-        params: {
-          progressToken,
-          progress: done,
-          total: orders.length,
-          message,
-        },
-      });
-    };
-
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try {
         socket.close();
-      } catch {
-        // Already closing; nothing to do.
-      }
+      } catch {}
       error ? reject(error) : resolve(value);
     };
 
-    // A batch that runs out of time keeps whatever came back. Throwing here
-    // would discard finished artifacts the pool already spent allowance
-    // producing, and the orchestrator would have no way to recover them.
     const timer = setTimeout(() => {
       if (done === 0) {
         finish(
           new Error(
-            `No orders came back within ${timeoutSeconds}s. The pool may be busy; ` +
-              `try again with fewer orders or a longer timeoutSeconds.`,
+            `No orders came back within ${timeoutSeconds}s. No earning session ` +
+              "claimed the work, or the claimed task did not finish in time.",
           ),
         );
-        return;
+      } else {
+        finish(null, artifacts);
       }
-      finish(null, artifacts);
     }, timeoutSeconds * 1000);
 
     socket.addEventListener("open", () => {
       socket.send(JSON.stringify({ type: "submit", orders }));
-      // Orders outnumbering workers is the usual reason a batch feels slow, so
-      // say it up front instead of letting it look like a stall.
-      const workers = pool?.earners ?? 0;
+      const waiting = pool?.idle ?? 0;
       notify(
-        orders.length > workers
-          ? `submitted ${orders.length} orders to ${workers} worker(s) — some will queue`
-          : `submitted ${orders.length} order(s) to ${workers} worker(s)`,
+        progressToken,
+        done,
+        orders.length,
+        waiting > 0
+          ? `submitted ${orders.length} order(s); ${waiting} earning session(s) waiting`
+          : `queued ${orders.length} order(s); waiting for someone to open /earn`,
       );
     });
 
@@ -193,32 +203,31 @@ function delegate(orders, cfg, progressToken, timeoutSeconds, pool) {
       } catch {
         return;
       }
-
       if (message.type === "progress" && message.state === "claimed") {
-        notify(`order ${message.index + 1} claimed by ${message.worker}`);
-        return;
-      }
-
-      if (message.type === "progress" && message.state === "requeued") {
         notify(
-          `order ${message.index + 1} went back in the queue — ${message.worker} dropped off`,
+          progressToken,
+          done,
+          orders.length,
+          `order ${message.index + 1} claimed in ${message.worker}'s visible Codex task`,
         );
-        return;
-      }
-
-      if (message.type === "result") {
+      } else if (message.type === "progress" && message.state === "requeued") {
+        notify(
+          progressToken,
+          done,
+          orders.length,
+          `order ${message.index + 1} returned to the queue after ${message.worker} closed`,
+        );
+      } else if (message.type === "result") {
         if (artifacts[message.index] === null) done += 1;
         artifacts[message.index] = {
           status: message.status,
           worker: message.worker,
           artifact: message.artifact,
+          files: persistReturnedFiles(message.job, message.files),
         };
-        notify(`${done} of ${orders.length} back`);
+        notify(progressToken, done, orders.length, `${done} of ${orders.length} returned`);
         if (done === orders.length) finish(null, artifacts);
-        return;
-      }
-
-      if (message.type === "error") {
+      } else if (message.type === "error") {
         finish(new Error(message.error || "Relay rejected the batch."));
       }
     });
@@ -226,13 +235,12 @@ function delegate(orders, cfg, progressToken, timeoutSeconds, pool) {
     socket.addEventListener("error", () => {
       finish(new Error(`Could not reach the Overflow relay at ${cfg.relay}.`));
     });
-
     socket.addEventListener("close", () => {
-      if (done === 0) {
-        finish(new Error("The relay closed the connection before any order ran."));
-        return;
+      if (!settled && done === 0) {
+        finish(new Error("The relay closed before any order returned."));
+      } else if (!settled && done < orders.length) {
+        finish(null, artifacts);
       }
-      if (done < orders.length) finish(null, artifacts);
     });
   });
 }
@@ -241,27 +249,24 @@ function renderArtifacts(orders, artifacts) {
   const missing = artifacts
     .map((entry, index) => (entry ? null : index + 1))
     .filter((index) => index !== null);
-
   const body = artifacts
     .map((entry, index) => {
       const header = `## Order ${index + 1}: ${orders[index].objective}`;
-      if (!entry) {
-        return `${header}\n_NOT RETURNED — no worker completed this order._`;
-      }
+      if (!entry) return `${header}\n_NOT RETURNED._`;
       const attribution =
         entry.status === "completed"
-          ? `_returned by ${entry.worker}_`
-          : `_FAILED on ${entry.worker}_`;
-      return `${header}\n${attribution}\n\n${entry.artifact}`;
+          ? `_returned from ${entry.worker}'s visible Overflow task_`
+          : `_FAILED in ${entry.worker}'s Overflow task_`;
+      const returnedFiles = entry.files?.length
+        ? `\n\nReturned files:\n${entry.files.map((file) => `- ${file.path}`).join("\n")}`
+        : "";
+      return `${header}\n${attribution}\n\n${entry.artifact}${returnedFiles}`;
     })
     .join("\n\n---\n\n");
-
   if (missing.length === 0) return body;
   return (
-    `**${artifacts.length - missing.length} of ${artifacts.length} orders came back.** ` +
-    `Order(s) ${missing.join(", ")} did not. Keep what returned and either ` +
-    `delegate only the missing order(s) again or do those locally — do not ` +
-    `re-run the ones below.\n\n${body}`
+    `**${artifacts.length - missing.length} of ${artifacts.length} orders returned.** ` +
+    `Order(s) ${missing.join(", ")} did not.\n\n${body}`
   );
 }
 
@@ -271,36 +276,21 @@ async function callDelegate(params) {
   const orders = normalizeOrders(args);
   const timeoutSeconds = Math.min(
     3600,
-    Math.max(30, Number(args.timeoutSeconds ?? 600)),
+    Math.max(30, Number(args.timeoutSeconds ?? 1800)),
   );
-
-  // Parking into an empty pool is the one failure the user cannot diagnose:
-  // they would sit and watch a spinner with nothing on the other end. Check
-  // first and hand the work straight back instead.
-  const status = await poolStatus(cfg);
-  if (status.earners === 0) {
-    return {
-      content: [
-        {
-          type: "text",
-          text:
-            "No Overflow workers are online, so nothing was delegated. " +
-            "Tell the user the pool is empty and either do the smallest useful " +
-            "piece locally or ask them to get a friend to run `overflow earn`.",
-        },
-      ],
-      structuredContent: { delegated: false, earners: 0 },
-    };
+  let pool = null;
+  try {
+    pool = await poolStatus(cfg);
+  } catch {
+    // The WebSocket below reports the actionable connection failure.
   }
-
   const artifacts = await delegate(
     orders,
     cfg,
     params._meta?.progressToken,
     timeoutSeconds,
-    status,
+    pool,
   );
-
   return {
     content: [{ type: "text", text: renderArtifacts(orders, artifacts) }],
     structuredContent: {
@@ -312,6 +302,195 @@ async function callDelegate(params) {
   };
 }
 
+function claimOne(cfg, progressToken, timeoutSeconds) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(socketUrl(cfg.relay, "/earn", cfg.token, cfg.name));
+    let settled = false;
+
+    const finish = (error, job, closeSocket) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (closeSocket) {
+        try {
+          socket.close();
+        } catch {}
+      }
+      error ? reject(error) : resolve(job);
+    };
+
+    const timer = setTimeout(() => finish(null, null, true), timeoutSeconds * 1000);
+
+    socket.addEventListener("open", () => {
+      notify(progressToken, 0, 1, "waiting for one Overflow task");
+    });
+    socket.addEventListener("message", (event) => {
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (message.type === "job" && !activeClaim) {
+        activeClaim = {
+          id: message.id,
+          order: message.order,
+          socket,
+          worker: cfg.name,
+        };
+        notify(progressToken, 1, 1, `claimed task ${message.id.slice(0, 4)}`);
+        finish(null, activeClaim, false);
+      } else if (message.type === "error") {
+        finish(new Error(message.error || "Relay rejected the claim."), null, true);
+      }
+    });
+    socket.addEventListener("error", () => {
+      if (!settled) {
+        finish(new Error(`Could not reach the Overflow relay at ${cfg.relay}.`), null, true);
+      }
+    });
+    socket.addEventListener("close", () => {
+      if (activeClaim?.socket === socket) activeClaim = null;
+      if (!settled) finish(new Error("The task feed closed before a task arrived."), null, false);
+    });
+  });
+}
+
+function compactTitle(id, objective) {
+  const text = objective.replace(/\s+/g, " ").trim();
+  return `Overflow: tsk ${id.slice(0, 4)} ${text.slice(0, 48)}`;
+}
+
+function renderClaim(job) {
+  const title = compactTitle(job.id, job.order.objective);
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Claimed Overflow task ${job.id}.\n\n` +
+          `Rename this visible Codex task to: ${title}\n\n` +
+          `# Objective\n${job.order.objective}\n\n` +
+          `# Context\n${job.order.context || "No additional context supplied."}\n\n` +
+          `# Expected artifact\n${job.order.expectedArtifact}\n\n` +
+          `# Acceptance test\n${job.order.acceptanceTest}\n\n` +
+          "Do this work in the current visible task. Do not spawn a hidden executor. " +
+          "When the artifact is complete, call overflow_return with this exact job ID.",
+      },
+    ],
+    structuredContent: {
+      claimed: true,
+      jobId: job.id,
+      shortId: job.id.slice(0, 4),
+      suggestedTitle: title,
+      order: job.order,
+    },
+  };
+}
+
+async function callClaim(params) {
+  if (activeClaim) return renderClaim(activeClaim);
+  if (pendingClaim) {
+    throw new Error("This Codex task is already waiting for an Overflow order.");
+  }
+  const args = params.arguments ?? {};
+  const timeoutSeconds = Math.min(
+    3600,
+    Math.max(30, Number(args.timeoutSeconds ?? 1800)),
+  );
+  pendingClaim = true;
+  try {
+    const job = await claimOne(config(), params._meta?.progressToken, timeoutSeconds);
+    if (!job) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No task arrived within ${timeoutSeconds}s. Nothing was claimed or run.`,
+          },
+        ],
+        structuredContent: { claimed: false },
+      };
+    }
+    return renderClaim(job);
+  } finally {
+    pendingClaim = false;
+  }
+}
+
+function returnActiveJob(jobId, artifact, status, files) {
+  return new Promise((resolve, reject) => {
+    const claim = activeClaim;
+    if (!claim || claim.id !== jobId) {
+      reject(new Error("This visible Codex task does not hold that Overflow job."));
+      return;
+    }
+    const socket = claim.socket;
+    let settled = false;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.removeEventListener("message", onMessage);
+      socket.removeEventListener("close", onClose);
+      activeClaim = null;
+      try {
+        socket.close();
+      } catch {}
+    };
+    const finish = (error, delivered) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      error ? reject(error) : resolve(delivered);
+    };
+    const onMessage = (event) => {
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (message.type === "returned" && message.id === jobId) {
+        finish(null, Boolean(message.delivered));
+      } else if (message.type === "error") {
+        finish(new Error(message.error || "Relay rejected the artifact."));
+      }
+    };
+    const onClose = () => finish(new Error("The relay closed before confirming return."));
+    const timer = setTimeout(
+      () => finish(new Error("The relay did not confirm the return within 15s.")),
+      15_000,
+    );
+
+    socket.addEventListener("message", onMessage);
+    socket.addEventListener("close", onClose);
+    socket.send(JSON.stringify({ type: "result", id: jobId, status, artifact, files }));
+  });
+}
+
+async function callReturn(params) {
+  const args = params.arguments ?? {};
+  const jobId = requireString(args.jobId, "jobId");
+  const artifact = requireString(args.artifact, "artifact");
+  if (Buffer.byteLength(artifact, "utf8") > MAX_ARTIFACT_BYTES) {
+    throw new Error("artifact exceeds the 600 KB return limit");
+  }
+  const files = readReturnFiles(args.files);
+  const status = args.status === "failed" ? "failed" : "completed";
+  const delivered = await returnActiveJob(jobId, artifact, status, files);
+  return {
+    content: [
+      {
+        type: "text",
+        text: delivered
+          ? `Returned Overflow task ${jobId.slice(0, 4)}${files.length ? ` with ${files.length} file(s)` : ""} to its requester.`
+          : `Finished Overflow task ${jobId.slice(0, 4)}, but its requester is no longer connected.`,
+      },
+    ],
+    structuredContent: { returned: true, delivered, jobId, status, files: files.map(({ dataBase64, ...file }) => file) },
+  };
+}
+
 async function callJoin(params) {
   const args = params.arguments ?? {};
   const current = config();
@@ -320,83 +499,70 @@ async function callJoin(params) {
       ? args.inviteCode.trim()
       : current.token;
   const relay =
-    typeof args.relay === "string" && args.relay.trim() ? args.relay.trim() : current.relay;
+    typeof args.relay === "string" && args.relay.trim()
+      ? args.relay.trim()
+      : current.relay;
   const name =
-    typeof args.name === "string" && args.name.trim() ? args.name.trim() : current.name;
-
-  // Check the code before storing it, so a typo fails here rather than silently
-  // leaving someone in a pool of one.
+    typeof args.name === "string" && args.name.trim()
+      ? args.name.trim()
+      : current.name;
   const check = new URL("/status", relay);
   check.searchParams.set("token", inviteCode);
   const response = await fetch(check, { signal: AbortSignal.timeout(10_000) });
-  if (response.status === 401) {
-    throw new Error("That pool did not accept this plugin's credentials.");
-  }
+  if (response.status === 401) throw new Error("That pool rejected this invite code.");
   if (!response.ok) throw new Error(`The relay answered ${response.status}.`);
   const pool = await response.json();
-
   writeConfig({ relay, token: inviteCode, name });
-  const started = startEarning();
-
-  const others =
-    (pool.workers || []).map((w) => w.name).filter((n) => n !== name).join(", ") ||
-    "nobody else yet";
   return {
     content: [
       {
         type: "text",
         text:
-          `This machine is in the pool as "${name}". Also online: ${others}.\n\n` +
-          (started || earning
-            ? "It takes work for the pool whenever Codex is open, and stops when Codex is closed."
-            : "Work-sharing is off here (OVERFLOW_EARN=0), so it will delegate but not take jobs.") +
-          "\n\nBelow 25% allowance, sessions start delegating to the pool automatically.",
+          `This machine is in the pool as "${name}". ` +
+          `${pool.queued ?? 0} order(s) are waiting. Open a dedicated task and run /earn to take one.`,
       },
     ],
-    structuredContent: { name, relay, earning: started || earning, poolSize: pool.earners ?? 0 },
+    structuredContent: { name, relay, queued: pool.queued ?? 0 },
   };
 }
 
 async function callPool() {
   const pool = await poolStatus(config());
   const names = (pool.workers || []).map(
-    (w) =>
-      `${w.name}${w.sessions > 1 ? ` (${w.sessions} sessions)` : ""}${w.busy ? " — busy" : ""}`,
+    (worker) => `${worker.name}${worker.busy ? " — working" : " — waiting"}`,
   );
   return {
     content: [
       {
         type: "text",
         text:
-          `${pool.machines ?? pool.earners} machine(s) online: ${names.join(", ") || "none"}.\n` +
-          `${pool.idle} free, ${pool.queued} order(s) waiting.\n` +
-          `This machine is ${earning ? "taking work for the pool" : "not taking work"}.`,
+          `${pool.earners} visible /earn session(s): ${names.join(", ") || "none"}.\n` +
+          `${pool.idle} waiting, ${pool.queued} order(s) queued.\n` +
+          (activeClaim
+            ? `This task holds job ${activeClaim.id.slice(0, 4)}.`
+            : pendingClaim
+              ? "This task is waiting for a job."
+              : "This task is not earning."),
       },
     ],
-    structuredContent: { ...pool, thisMachineEarning: earning },
+    structuredContent: {
+      ...pool,
+      thisTaskWaiting: pendingClaim,
+      thisTaskJobId: activeClaim?.id ?? null,
+    },
   };
 }
 
 const ORDER_SCHEMA = {
   type: "object",
   properties: {
-    objective: {
-      type: "string",
-      description: "Exact outcome the worker must produce.",
-    },
+    objective: { type: "string", description: "Exact outcome the worker must produce." },
     context: {
       type: "string",
-      description:
-        "Everything the worker needs. It runs on a stranger's computer and can see none of your files.",
+      description: "Everything the worker needs from this conversation or machine.",
     },
-    expectedArtifact: {
-      type: "string",
-      description: "Concrete shape of the response to return.",
-    },
-    acceptanceTest: {
-      type: "string",
-      description: "How you will decide whether the returned artifact is usable.",
-    },
+    expectedArtifact: { type: "string", description: "Concrete shape of the response." },
+    acceptanceTest: { type: "string", description: "How the requester will judge it." },
   },
   required: ["objective", "expectedArtifact", "acceptanceTest"],
   additionalProperties: false,
@@ -404,72 +570,34 @@ const ORDER_SCHEMA = {
 
 async function handleRequest(message) {
   const { id, method, params } = message;
-
   if (method === "initialize") {
     sendResult(id, {
       protocolVersion: params?.protocolVersion ?? "2025-11-25",
       capabilities: { tools: {} },
-      serverInfo: { name: "Overflow delegation", version: "0.3.0" },
+      serverInfo: { name: "Overflow", version: "0.3.0" },
       instructions:
-        "When Overflow reports low remaining allowance, coordinate instead of executing: " +
-        "package the work as orders and call overflow_delegate once with all of them. " +
-        "The call parks without spending allowance and returns the workers' artifacts.",
+        "Overflow never runs hidden workers. Use overflow_delegate when the user asks to offload work. " +
+        "Only call overflow_claim when the user explicitly starts earning; do the claimed work in this " +
+        "visible task, rename it, and call overflow_return with the finished artifact.",
     });
     return;
   }
-
   if (method === "ping") return sendResult(id, {});
-
-  if (method === "notifications/initialized" || method === "initialized") {
-    // The session is up; take work for other people from here on.
-    startEarning();
-    return;
-  }
+  if (method === "notifications/initialized" || method === "initialized") return;
 
   if (method === "tools/list") {
     sendResult(id, {
       tools: [
         {
-          name: PAIR_TOOL,
-          title: "Set how this machine appears in the pool",
+          name: DELEGATE_TOOL,
+          title: "Delegate work through Overflow",
           description:
-            "Change the name this machine shows as in the Overflow pool, or point it at a different pool. " +
-            "Installing the plugin already joins the default pool, so this is only needed when the user wants " +
-            "to be called something other than their hostname, or is switching pools.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              name: { type: "string", description: "What to call this machine in the pool." },
-              relay: { type: "string", description: "Only when switching to a different pool's relay." },
-              inviteCode: { type: "string", description: "Only when switching to a pool that needs its own code." },
-            },
-            required: [],
-            additionalProperties: false,
-          },
-          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-        },
-        {
-          name: STATUS_TOOL,
-          title: "Show the Overflow pool",
-          description:
-            "Show who is currently online in the user's Overflow pool and whether this machine is taking work. " +
-            "Call this when the user asks about their pool, who is available, or whether Overflow is working.",
-          inputSchema: { type: "object", properties: {}, additionalProperties: false },
-          annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-        },
-        {
-          name: TOOL,
-          title: "Delegate through Overflow",
-          description:
-            "Send the work you were about to do to idle Codex installations belonging to the user's friends, " +
-            "and return their artifacts. Blocks until every order is answered, without spending allowance " +
-            "while it waits. Pass every order in one call so they run in parallel.",
+            "Queue one or more bounded orders and park until visible /earn sessions return the artifacts.",
           inputSchema: {
             type: "object",
             properties: {
               orders: {
                 type: "array",
-                description: "Every order to run in parallel. 1 to 8.",
                 items: ORDER_SCHEMA,
                 minItems: 1,
                 maxItems: 8,
@@ -478,7 +606,7 @@ async function handleRequest(message) {
                 type: "integer",
                 minimum: 30,
                 maximum: 3600,
-                default: 600,
+                default: 1800,
               },
             },
             required: ["orders"],
@@ -491,6 +619,98 @@ async function handleRequest(message) {
             openWorldHint: true,
           },
         },
+        {
+          name: CLAIM_TOOL,
+          title: "Take one Overflow task",
+          description:
+            "Wait for and claim one queued order for this visible Codex task. Use only after the user explicitly asks to earn or take work.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              timeoutSeconds: {
+                type: "integer",
+                minimum: 30,
+                maximum: 3600,
+                default: 1800,
+              },
+            },
+            additionalProperties: false,
+          },
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+          },
+        },
+        {
+          name: RETURN_TOOL,
+          title: "Return completed Overflow work",
+          description:
+            "Return the artifact produced in this visible Codex task to the original requester.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              jobId: { type: "string" },
+              artifact: { type: "string" },
+              files: {
+                type: "array",
+                maxItems: MAX_FILES,
+                description: "Optional local files to deliver with the artifact. The plugin reads and transfers them directly.",
+                items: {
+                  type: "object",
+                  properties: {
+                    path: { type: "string", description: "Absolute or working-directory-relative local file path." },
+                    name: { type: "string", description: "Optional filename shown to the requester." },
+                  },
+                  required: ["path"],
+                  additionalProperties: false,
+                },
+              },
+              status: { type: "string", enum: ["completed", "failed"], default: "completed" },
+            },
+            required: ["jobId", "artifact"],
+            additionalProperties: false,
+          },
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+          },
+        },
+        {
+          name: STATUS_TOOL,
+          title: "Show the Overflow pool",
+          description: "Show waiting /earn sessions, queued work, and this task's state.",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true,
+          },
+        },
+        {
+          name: JOIN_TOOL,
+          title: "Configure this Overflow pool",
+          description: "Change this machine's pool name, relay, or invite code.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              relay: { type: "string" },
+              inviteCode: { type: "string" },
+            },
+            additionalProperties: false,
+          },
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true,
+          },
+        },
       ],
     });
     return;
@@ -498,34 +718,29 @@ async function handleRequest(message) {
 
   if (method === "tools/call") {
     try {
-      if (params?.name === PAIR_TOOL) return sendResult(id, await callJoin(params));
+      if (params?.name === DELEGATE_TOOL) return sendResult(id, await callDelegate(params));
+      if (params?.name === CLAIM_TOOL) return sendResult(id, await callClaim(params));
+      if (params?.name === RETURN_TOOL) return sendResult(id, await callReturn(params));
       if (params?.name === STATUS_TOOL) return sendResult(id, await callPool());
-      if (params?.name !== TOOL) {
-        return sendError(id, INVALID_PARAMS, `Unknown tool: ${params?.name ?? ""}`);
-      }
-      sendResult(id, await callDelegate(params));
+      if (params?.name === JOIN_TOOL) return sendResult(id, await callJoin(params));
+      return sendError(id, INVALID_PARAMS, `Unknown tool: ${params?.name ?? ""}`);
     } catch (error) {
-      sendError(
+      return sendError(
         id,
         INVALID_PARAMS,
         error instanceof Error ? error.message : String(error),
       );
     }
-    return;
   }
-
-  if (id !== undefined) {
-    sendError(id, METHOD_NOT_FOUND, `Method not found: ${method}`);
-  }
+  if (id !== undefined) sendError(id, METHOD_NOT_FOUND, `Method not found: ${method}`);
 }
 
-readline
-  .createInterface({ input: process.stdin, crlfDelay: Infinity })
-  .on("line", (line) => {
-    if (!line.trim()) return;
-    try {
-      void handleRequest(JSON.parse(line));
-    } catch {
-      // Malformed transport input must not kill the server.
-    }
-  });
+const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+for await (const line of input) {
+  if (!line.trim()) continue;
+  try {
+    await handleRequest(JSON.parse(line));
+  } catch (error) {
+    sendError(null, INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+  }
+}

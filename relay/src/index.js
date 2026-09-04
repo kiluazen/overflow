@@ -264,23 +264,32 @@ export class Pool {
   async completeJob(ws, message) {
     const meta = this.meta(ws);
     const job = meta.job && meta.job.id === message.id ? meta.job : null;
-    this.setMeta(ws, { busy: false, job: null });
-    if (job) await this.state.storage.delete(this.inFlightKey(job.id));
-
-    if (job) {
-      const requester = this.findByConnectionId(job.requester);
-      if (requester) {
-        this.send(requester, {
-          type: "result",
-          job: job.id,
-          index: job.index,
-          batch: job.batch,
-          status: message.status || "completed",
-          artifact: String(message.artifact ?? ""),
-          worker: meta.name,
-        });
-      }
+    if (!job) {
+      this.send(ws, {
+        type: "error",
+        error: "this earning session does not hold that job",
+      });
+      return;
     }
+    this.setMeta(ws, { busy: false, job: null });
+    await this.state.storage.delete(this.inFlightKey(job.id));
+
+    const requester = this.findByConnectionId(job.requester);
+    if (requester) {
+      this.send(requester, {
+        type: "result",
+        job: job.id,
+        index: job.index,
+        batch: job.batch,
+        status: message.status || "completed",
+        artifact: String(message.artifact ?? ""),
+        files: Array.isArray(message.files) ? message.files : [],
+        worker: meta.name,
+      });
+    }
+    // The visible earning task keeps this socket open while it works. Confirm
+    // that the relay forwarded the artifact before it closes the task feed.
+    this.send(ws, { type: "returned", id: job.id, delivered: Boolean(requester) });
     await this.drainQueue();
   }
 

@@ -1,136 +1,116 @@
 # Overflow
 
-**Your Codex allowance runs out. Your friends' hasn't.**
+**Make the last 10% coordination budget, not execution budget.**
 
-When your main Codex allowance is gone, Codex doesn't stop — it drops you onto a
-small model and you spend the rest of the week fighting it. Overflow turns that
-session into an orchestrator instead: it splits the work into orders, runs them
-on friends' idle Codex installations, and brings the results back into the same
-conversation.
+When your main Codex allowance falls below 10%, Overflow tells that session to
+coordinate: package bounded work, send it to friends with allowance left, and
+use what remains to review and integrate what comes back.
 
-Waiting costs you nothing. A delegated call suspends the session inside the tool
-call — measured on Codex 0.144.1, a 159-second wait cost the same as a call that
-failed instantly. You pay to decide what to delegate and to judge what comes
-back. That's it.
+The friend doing the work sees it. Overflow never starts a hidden Codex worker.
 
-## Join
+## Install
 
-Install the plugin. That is the whole thing — installing it puts you in the
-pool, in both directions.
+One plugin contains both sides.
 
 In the ChatGPT desktop app: **Add plugin marketplace** → source
-`kiluazen/overflow`, ref `main`, sparse path `plugins/codex`. Then add the
-Overflow plugin. From a terminal it is:
+`kiluazen/overflow`, ref `main`, sparse path `plugins/codex`. Then add Overflow.
+
+From a terminal:
 
 ```sh
 codex plugin marketplace add kiluazen/overflow
 codex plugin add overflow
 ```
 
-No code to paste, nothing to run, no pairing step. Ask Codex *"who's in my
-overflow pool?"* to see who is online, or *"call this machine <name> in the
-pool"* if you would rather not appear as your hostname.
+Start a fresh Codex task after installation so its skills and tools load.
 
-## Then two things happen by themselves
+## Give work: `/work`
 
-**When you're nearly out**, do nothing. A session that starts below 25%
-remaining is told to coordinate rather than execute. Ask for what you wanted; it
-writes the orders, sends them out, shows progress while it waits, and assembles
-the answer.
+Run `/work` or ask Codex to offload a task. Overflow turns each independent
+piece into a self-contained order and calls `overflow_delegate` once. The
+requesting task parks while it waits, so it does not spend allowance narrating
+the wait.
 
-**When you have allowance spare**, your machine takes work for the pool on its
-own, for as long as you have Codex open. The plugin's own server holds one
-socket and runs one job at a time on your Codex login. Nothing is installed in
-the background, nothing keeps running after you quit Codex, and it stops taking
-work by itself once your own allowance drops below 25% — the point at which
-you're the one who needs the pool.
+Below 10% remaining main allowance, the SessionStart hook automatically tells
+the new task to use this coordinator behavior. It does not fabricate work or
+send anything before the user asks for a task to be done.
 
-Set `OVERFLOW_EARN=0` to stay in the pool as a requester only.
+## Take work: `/earn`
 
-The pool's credential ships in the plugin, which is what makes installing it
-enough. This repository is public, so that credential is a doorbell rather than
-a lock: it stops the relay answering random internet traffic, and nothing more.
-Per-person codes are the fix if that ever matters.
+Open a dedicated, normal Codex task and run `/earn` or say “take an Overflow
+task.” That visible task:
 
-## What running `earn` actually means
+1. calls `overflow_claim` and waits for one queued order;
+2. renames itself `Overflow: tsk <first 4 job characters> <short objective>`;
+3. performs the order in that conversation, using its installed skills and
+   relevant local context;
+4. calls `overflow_return` with the finished artifact; and
+5. tells its user whether the requester received it.
 
-Worth knowing before you put your laptop in someone's pool. A job is a prompt
-written by another person in the pool, run on your machine by `codex exec` with
-approvals turned off. Measured, not assumed:
+The earning task takes exactly one order. It never starts `codex exec`, a
+background model, another task, or a hidden subagent. Run `/earn` again when you
+want another.
 
-- **It cannot write outside its scratch directory.** `workspace-write` blocks it,
-  and the directory is deleted when the job ends.
-- **It has no network access**, so it cannot send anything anywhere. Set
-  `OVERFLOW_WORKER_NETWORK=1` if you want jobs to reach the internet — that also
-  removes the thing stopping a job from posting what it read on your machine.
-- **It can read your files.** `workspace-write` sandboxes writes, not reads, so a
-  job can read anything your user account can, `~/.codex/auth.json` included, and
-  put what it finds in the artifact it returns.
+If no work exists, the `overflow_claim` tool can stay parked until one arrives.
+No model turns are spent while the tool is waiting.
 
-That last one is the real limit: a job's output goes back to whoever submitted
-it, so an order could be written to read something of yours and return it. This
-is why a pool is people you know. Run `earn` for friends, not for strangers.
+When the result is a file, `overflow_return` reads it locally and transfers its
+bytes through the relay. The requester plugin saves received files under its
+private plugin-data `returns/` directory and puts their paths in the original
+tool result.
 
-## Run your own relay
+## What installing does—and does not do
 
-One Cloudflare Worker with a single Durable Object. Both sides hold hibernatable
-WebSockets, so nobody polls and an idle pool costs almost nothing.
+Installing makes `/work`, `/earn`, and the relay tools available. It does not
+make every open Codex task an automatic worker. A machine becomes available to
+take work only while its user has explicitly opened an earning task and run
+`/earn`.
+
+The current prototype uses one shared trusted-friends pool. Installing the
+plugin supplies its default relay configuration; `overflow_join` exists only
+to change the machine name or point at another pool.
+
+## Safety boundary
+
+Orders come from other people and their artifacts return to those people. An
+earning task may use this machine’s skills and relevant reference material, but
+must not expose credentials, secrets, or unrelated files. External publishing,
+messages, purchases, and destructive changes still require authorization from
+the machine’s user in the visible earning conversation.
+
+## Architecture
+
+```text
+requester's visible Codex task
+  → overflow_delegate
+  → relay queue
+  → friend's visible /earn Codex task
+  → overflow_claim returns the order into that conversation
+  → that conversation performs the work
+  → overflow_return
+  → original overflow_delegate call receives the artifact
+```
+
+The relay is a Cloudflare Worker with one Durable Object. Requester and earner
+tools hold hibernatable WebSockets while waiting; no process polls.
+
+## Repository layout
+
+```text
+plugins/codex/
+  hooks/session_start.py    detects less than 10% remaining allowance
+  skills/work/SKILL.md      requester behavior
+  skills/earn/SKILL.md      visible earner behavior
+  mcp/server.mjs            delegate / claim / return / pool / join tools
+  lib/config.mjs            trusted-pool configuration
+relay/src/index.js          durable queue and result routing
+test-support/               protocol-only test harnesses; never installed
+```
+
+## Run the relay
 
 ```sh
 cd relay
-wrangler secret put OVERFLOW_TOKEN   # the shared invite code
+wrangler secret put OVERFLOW_TOKEN
 wrangler deploy
 ```
-
-## Layout
-
-```
-plugins/codex/          the plugin (the marketplace sparse path)
-  hooks/                allowance check at session start
-  skills/overflow/      how to coordinate instead of execute
-  mcp/server.mjs        overflow_join / overflow_pool / overflow_delegate
-  lib/earner.mjs        takes work for the pool, run by the server above
-  scripts/earn.mjs      debugging entry point, not part of the flow
-relay/                  Worker + Durable Object job board
-```
-
-## Four settings that are not optional
-
-Codex misbehaves quietly without each of these, so they ship in
-`plugins/codex/.mcp.json`:
-
-- `tools.overflow_delegate.approval_mode = "auto"` — without it the call is
-  cancelled before the server ever receives it, and the user is told *they*
-  cancelled it.
-- **Tool search, named explicitly.** Codex defers MCP tools, so
-  `overflow_delegate` is not in the model's immediate tool list — it must be
-  loaded through tool search. An orchestrator that doesn't know this reports the
-  tool missing and delegates nothing while the server runs fine. The
-  instructions have to name tool search, and separately forbid hunting on the
-  filesystem: they are two different searches, and conflating them costs you
-  either way.
-- `tool_timeout_sec` — the default is far shorter than a real job.
-- `env_vars` — Codex does not pass the parent shell's environment to MCP
-  servers. Anything inherited from a login shell arrives undefined.
-
-## What's been verified
-
-Against the deployed relay, from a plugin installed the way you'd install it:
-
-- a real low-allowance session, from a clean marketplace install, splits a
-  release-notes request into four parallel orders, delegates in one call, gets
-  4/4 back from two real Codex workers, and assembles the answer — zero shell
-  commands
-- six orders with 3.6 KB of context each, across two workers, return 6/6
-- a batch that runs out of time keeps the artifacts that came back and names the
-  ones that didn't, and the orchestrator re-delegates only those
-- an empty pool refuses to park, in 0.1s
-- a worker that dies mid-job fails that order instead of hanging its requester
-- workers dropped by a relay deploy reconnect on their own within seconds
-- ten machines in one pool, three people delegating at once: 17 orders, all
-  returned, none routed to the wrong person
-- half the pool closing their laptops mid-batch: every dropped order is re-run
-  on a surviving machine, 14/14 artifacts, nothing lost
-
-Not yet verified: two people on two machines with two different accounts, and
-Esc during a park.
