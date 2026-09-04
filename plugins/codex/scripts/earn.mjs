@@ -13,6 +13,11 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+// The pool everyone joins by default. A friend who is handed an invite code
+// should not also have to be handed a URL, remember which of the two goes first,
+// or paste either of them correctly at 1am.
+const DEFAULT_RELAY = "https://overflow-relay.kushalsokke.workers.dev";
+
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 // Cloudflare drops a WebSocket message over 1 MiB. An artifact past that limit
@@ -213,13 +218,25 @@ function connect(cfg, state) {
   });
 }
 
-function pair(relay, token, name) {
-  if (!relay || !token) {
-    process.stderr.write("usage: overflow pair <relay-url> <invite-code> [name]\n");
+// Accepts `pair <code>`, `pair <code> <name>`, or the long form
+// `pair <relay-url> <code> [name]`. The first argument is a URL or it is not,
+// and that is enough to tell the two forms apart.
+function pair(first, second, third) {
+  const looksLikeUrl = typeof first === "string" && /^https?:\/\//.test(first);
+  const relay = looksLikeUrl ? first : DEFAULT_RELAY;
+  const token = looksLikeUrl ? second : first;
+  const name = (looksLikeUrl ? third : second) || os.hostname();
+
+  if (!token) {
+    process.stderr.write(
+      "usage: overflow pair <invite-code> [your-name]\n" +
+        "       overflow pair <relay-url> <invite-code> [your-name]\n",
+    );
     process.exit(2);
   }
-  writeConfig({ relay, token, name: name || os.hostname() });
-  log(`paired with ${relay}`);
+  writeConfig({ relay, token, name });
+  log(`paired with ${relay} as "${name}"`);
+  log("run this again with no arguments to start taking jobs");
 }
 
 const [command, ...rest] = process.argv.slice(2);

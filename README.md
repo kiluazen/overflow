@@ -23,15 +23,18 @@ codex plugin add overflow
 ```
 
 ```sh
-node ~/.codex/.tmp/marketplaces/overflow/plugins/codex/scripts/earn.mjs pair <relay-url> <invite-code>
+node <plugin>/scripts/earn.mjs pair <invite-code> <your-name>
 ```
+
+The relay URL is baked in, so an invite code is the only thing you need to be
+handed.
 
 In the ChatGPT desktop app it's **Add plugin marketplace** → source
 `kiluazen/overflow`, sparse path `plugins/codex`.
 
 ## Then two things happen by themselves
 
-**When you're nearly out**, do nothing. A session that starts below 15%
+**When you're nearly out**, do nothing. A session that starts below 25%
 remaining is told to coordinate rather than execute. Ask for what you wanted; it
 writes the orders, sends them out, shows progress while it waits, and assembles
 the answer.
@@ -106,28 +109,6 @@ Codex misbehaves quietly without each of these, so they ship in
 - `env_vars` — Codex does not pass the parent shell's environment to MCP
   servers. Anything inherited from a login shell arrives undefined.
 
-## Does it actually save you anything?
-
-Measured, requester on the small model and workers on the good one:
-
-| job | | output tokens | content delivered |
-|---|---|---|---|
-| ~550 words | written directly | **988** | 558 words |
-| | delegated | 2,400 | 546 words |
-| ~1,900 words | written directly | 4,223 | 1,930 words |
-| | delegated | **2,356** | **2,599 words** |
-
-Delegating a short job is a straight loss — writing the orders costs about what
-writing a thousand words of answer costs. Delegating a substantial one costs
-under half the output and returns more finished text, because the writing
-happened on someone else's allowance. Overflow estimates the answer length and
-declines to delegate below roughly a thousand words.
-
-Two things had to be true for that second row. The orchestrator must not retype
-what the workers wrote — the tool result is already on screen, and copying it
-into its own reply pays for every word twice. And the job has to be big enough
-to earn back the orders.
-
 ## What's been verified
 
 Against the deployed relay, from a plugin installed the way you'd install it:
@@ -142,6 +123,10 @@ Against the deployed relay, from a plugin installed the way you'd install it:
 - an empty pool refuses to park, in 0.1s
 - a worker that dies mid-job fails that order instead of hanging its requester
 - workers dropped by a relay deploy reconnect on their own within seconds
+- ten machines in one pool, three people delegating at once: 17 orders, all
+  returned, none routed to the wrong person
+- half the pool closing their laptops mid-batch: every dropped order is re-run
+  on a surviving machine, 14/14 artifacts, nothing lost
 
 Not yet verified: two people on two machines with two different accounts, and
 Esc during a park.

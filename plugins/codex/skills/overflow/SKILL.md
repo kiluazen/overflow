@@ -18,24 +18,6 @@ You still own: the user's intent, what happens next, anything touching files or
 credentials on this machine, and the final judgement of quality. A worker owns
 one bounded piece of execution and nothing else.
 
-## Is this worth delegating?
-
-Writing orders is not free — it costs about what writing a thousand words of
-answer costs. So estimate the finished answer first, in words.
-
-**Under 1,000 words: do not delegate.** Write it here. Measured, a 550-word job
-cost 988 output tokens written directly and 2,400 delegated.
-
-**At or over 1,000 words: delegate.** The same measurement on a 1,900-word job:
-
-| | output tokens | content delivered |
-|---|---|---|
-| written here | 4,223 | 1,930 words |
-| delegated | 2,356 | 2,599 words |
-
-Less than half the output, for more finished text, because the writing happened
-on someone else's allowance.
-
 ## What to do
 
 1. Tell the user how much allowance is left and that you are delegating. One

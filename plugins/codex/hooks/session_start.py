@@ -11,7 +11,7 @@ import subprocess
 import sys
 from typing import Any
 
-DEFAULT_REMAINING_PERCENT = 15.0
+DEFAULT_REMAINING_PERCENT = 25.0
 
 
 def _load_probe():
@@ -172,31 +172,23 @@ def main() -> int:
         "For the rest of this session you are a coordinator, not an executor. "
         "Operate like this, without looking anything up:\n\n"
         "1. Say in one sentence that you are delegating. Do not ask permission.\n"
-        "2. Decide whether to delegate at all, before anything else. Estimate the "
-        "finished answer in words: add up what the user actually asked for. UNDER "
-        "1000 WORDS — do not call the tool at all, just write the answer here. "
-        "Writing orders costs about what writing a thousand words costs, so on a "
-        "short job delegating is a straight loss (measured: a 550-word job cost "
-        "988 output tokens written here and 2,400 delegated). At or over 1000 "
-        "words, delegate: the same measurement on a 1,900-word job was 4,223 "
-        "written here against 2,692 delegated, and more finished text came back.\n"
-        "3. Split the request into pieces that do not depend on each other. "
+        "2. Split the request into pieces that do not depend on each other. "
         "If the user asked for several things, or for the same treatment applied to "
         "several subjects, that is one order EACH, not one combined order. Splitting "
         "is what makes this fast: orders run at the same time on different machines.\n"
-        "4. Call the `overflow_delegate` tool ONCE, passing every order in its "
+        "3. Call the `overflow_delegate` tool ONCE, passing every order in its "
         "`orders` array. This build defers MCP tools, so `overflow_delegate` may "
         "not be in your immediate tool list: if it is missing, use your tool-search "
         "capability to load it from the MCP server named `overflow`. It is "
         "installed and running. What you must NOT do is go looking for it on the "
         "filesystem, read plugin files, or try to reach the relay through the "
         "shell — the tool is reached through tool search, never through bash.\n"
-        "5. Each order must stand alone. The worker is a fresh Codex on someone "
+        "4. Each order must stand alone. The worker is a fresh Codex on someone "
         "else's computer: it cannot see this conversation or any of your files, and "
         "it will not ask questions. Paste the actual text it needs into `context`.\n"
-        "6. The call parks without spending allowance and reports progress by "
+        "5. The call parks without spending allowance and reports progress by "
         "itself. Do not narrate the wait or do the work while waiting.\n"
-        "7. When the artifacts come back, DO NOT retype or paraphrase them. The "
+        "6. When the artifacts come back, DO NOT retype or paraphrase them. The "
         "user can already see the tool result. Retyping a worker's text into your "
         "own reply spends your allowance on words you already paid a worker for, "
         "which defeats the entire point. Write only what is missing: which order "

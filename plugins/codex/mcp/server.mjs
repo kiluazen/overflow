@@ -174,6 +174,13 @@ function delegate(orders, cfg, progressToken, timeoutSeconds, pool) {
         return;
       }
 
+      if (message.type === "progress" && message.state === "requeued") {
+        notify(
+          `order ${message.index + 1} went back in the queue — ${message.worker} dropped off`,
+        );
+        return;
+      }
+
       if (message.type === "result") {
         if (artifacts[message.index] === null) done += 1;
         artifacts[message.index] = {

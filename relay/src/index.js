@@ -68,14 +68,27 @@ export class Pool {
     await this.state.storage.put("queue", this.queue);
   }
 
+  // In-flight jobs are kept whole (order included) in storage, not in the
+  // socket attachment, which is capped at 2 KB. Keeping the order is what makes
+  // it possible to hand the job to somebody else when a laptop closes.
+  inFlightKey(id) {
+    return `job:${id}`;
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
 
     if (url.pathname === "/status") {
+      const earners = this.socketsTagged("earner").map((ws) => {
+        const meta = this.meta(ws);
+        return { name: meta.name || "anon", busy: Boolean(meta.busy) };
+      });
       return Response.json({
-        earners: this.socketsTagged("earner").length,
-        idle: this.idleEarners().length,
+        earners: earners.length,
+        idle: earners.filter((e) => !e.busy).length,
         queued: this.queue.length,
+        // Named, so a pool owner can see who is actually in it.
+        workers: earners.sort((a, b) => a.name.localeCompare(b.name)),
       });
     }
 
@@ -223,6 +236,7 @@ export class Pool {
           requester: job.requester,
         },
       });
+      await this.state.storage.put(this.inFlightKey(job.id), job);
       this.send(earner, { type: "job", id: job.id, order: job.order });
       this.send(requester, {
         type: "progress",
@@ -239,6 +253,7 @@ export class Pool {
     const meta = this.meta(ws);
     const job = meta.job && meta.job.id === message.id ? meta.job : null;
     this.setMeta(ws, { busy: false, job: null });
+    if (job) await this.state.storage.delete(this.inFlightKey(job.id));
 
     if (job) {
       const requester = this.findByConnectionId(job.requester);
@@ -263,19 +278,37 @@ export class Pool {
 
   async webSocketClose(ws) {
     const meta = this.meta(ws);
-    // An earner that disappears mid-job leaves its requester parked forever, so
-    // fail that job explicitly rather than letting the park time out.
-    const job = meta.job;
-    if (job) {
-      const requester = this.findByConnectionId(job.requester);
-      if (requester) {
+    // A laptop closing mid-job is normal in a pool of friends, and the pool
+    // usually still has idle machines. Hand the order to one of them instead of
+    // failing it -- the requester is out of allowance and cannot redo it itself.
+    // Only give up once an order has been dropped twice.
+    const held = meta.job;
+    if (held) {
+      const stored = await this.state.storage.get(this.inFlightKey(held.id));
+      await this.state.storage.delete(this.inFlightKey(held.id));
+      const requester = this.findByConnectionId(held.requester);
+      const attempts = ((stored && stored.attempts) || 0) + 1;
+
+      if (requester && stored && attempts <= 2) {
+        this.queue.unshift({ ...stored, attempts });
+        await this.saveQueue();
+        this.send(requester, {
+          type: "progress",
+          job: held.id,
+          index: held.index,
+          state: "requeued",
+          worker: meta.name,
+        });
+      } else if (requester) {
         this.send(requester, {
           type: "result",
-          job: job.id,
-          index: job.index,
-          batch: job.batch,
+          job: held.id,
+          index: held.index,
+          batch: held.batch,
           status: "failed",
-          artifact: `Worker ${meta.name} disconnected before returning this order.`,
+          artifact:
+            `No worker completed this order: ${meta.name} disconnected` +
+            (attempts > 2 ? ` and ${attempts - 1} earlier attempts also dropped.` : "."),
           worker: meta.name,
         });
       }
