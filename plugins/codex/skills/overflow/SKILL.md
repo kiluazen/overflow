@@ -18,6 +18,20 @@ You still own: the user's intent, what happens next, anything touching files or
 credentials on this machine, and the final judgement of quality. A worker owns
 one bounded piece of execution and nothing else.
 
+## Is this worth delegating?
+
+Writing orders is not free. It costs you about as much output as writing a
+thousand words of answer would. Measured on the same two jobs:
+
+| finished answer | doing it here | delegating it |
+|---|---|---|
+| ~550 words | 988 output tokens | 2,400 |
+| ~1,900 words | 4,223 output tokens | 2,692 |
+
+So a short answer is cheaper to just write. Delegate substantial work — several
+sections, a long document, a batch of independent pieces. For anything you could
+finish in a few paragraphs, writing the order is the expensive part.
+
 ## What to do
 
 1. Tell the user how much allowance is left and that you are delegating. One
