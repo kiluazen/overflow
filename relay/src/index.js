@@ -60,6 +60,7 @@ export default {
         });
       }
       case "/api/activity":
+      case "/api/reset":
       case "/earn":
       case "/delegate":
       case "/status":
@@ -109,6 +110,13 @@ export class Pool {
 
   async fetch(request) {
     const url = new URL(request.url);
+
+    // Wipe the ledger. Token-gated, because it is the one thing here that
+    // destroys something.
+    if (url.pathname === "/api/reset") {
+      await this.state.storage.delete("events");
+      return Response.json({ cleared: true });
+    }
 
     if (url.pathname === "/api/activity") {
       const events = (await this.state.storage.get("events")) || [];

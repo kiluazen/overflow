@@ -9,9 +9,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
 import { dataDir, readConfig, writeConfig } from "../lib/config.mjs";
 
@@ -20,60 +17,17 @@ const CLAIM_TOOL = "overflow_claim";
 const RETURN_TOOL = "overflow_return";
 const JOIN_TOOL = "overflow_join";
 const STATUS_TOOL = "overflow_pool";
-const USAGE_TOOL = "overflow_usage";
 const INVALID_PARAMS = -32602;
 const METHOD_NOT_FOUND = -32601;
 const MAX_ARTIFACT_BYTES = 600_000;
 const MAX_FILES = 4;
 const MAX_FILE_BYTES = 12_000_000;
-const execFileAsync = promisify(execFile);
-const DEFAULT_REMAINING_PERCENT = 80;
 
 let pendingClaim = false;
 let activeClaim = null;
 
 function config() {
   return readConfig();
-}
-
-function remainingThreshold() {
-  const configured = Number(process.env.OVERFLOW_TRIGGER_REMAINING_PERCENT);
-  return Number.isFinite(configured)
-    ? Math.max(0, Math.min(100, configured))
-    : DEFAULT_REMAINING_PERCENT;
-}
-
-async function callUsage() {
-  const probe = fileURLToPath(new URL("../scripts/usage_probe.py", import.meta.url));
-  const { stdout } = await execFileAsync("python3", [probe], {
-    timeout: 15_000,
-    maxBuffer: 1_000_000,
-    env: process.env,
-  });
-  const usage = JSON.parse(stdout.trim());
-  if (usage.error) throw new Error(usage.error);
-
-  const threshold = remainingThreshold();
-  const shouldDelegate = Number(usage.remainingPercent) <= threshold;
-  const action = shouldDelegate
-    ? "Delegate substantive execution through Overflow and keep this task as the orchestrator."
-    : "Continue normally; Overflow is not needed for this task."
-
-  return {
-    content: [
-      {
-        type: "text",
-        text:
-          `Codex allowance: ${usage.remainingPercent}% remaining. ` +
-          `Overflow threshold: ${threshold}%. ${action}`,
-      },
-    ],
-    structuredContent: {
-      ...usage,
-      thresholdRemainingPercent: threshold,
-      shouldDelegate,
-    },
-  };
 }
 
 function send(message) {
@@ -622,11 +576,6 @@ async function handleRequest(message) {
       capabilities: { tools: {} },
       serverInfo: { name: "Overflow", version: "0.3.0" },
       instructions:
-        "Before doing any substantive user task that could consume meaningful Codex allowance, call " +
-        "overflow_usage once. The user does not need to mention Overflow. If it returns shouldDelegate=true, " +
-        "keep this visible task as the orchestrator: call overflow_pool, package the whole task as one bounded " +
-        "order, call overflow_delegate, and review what returns instead of doing the substantive work locally. " +
-        "Skip this usage check when the user explicitly asks to earn or take an Overflow task. " +
         "Overflow never runs hidden workers. Use overflow_delegate when the user asks to offload work. " +
         "Only call overflow_claim when the user explicitly starts earning; do the claimed work in this " +
         "visible task, rename it, and call overflow_return with the finished artifact.",
@@ -639,19 +588,6 @@ async function handleRequest(message) {
   if (method === "tools/list") {
     sendResult(id, {
       tools: [
-        {
-          name: USAGE_TOOL,
-          title: "Check whether this task should use Overflow",
-          description:
-            "Call once before starting any substantive user task, unless the user is explicitly earning. Returns current Codex allowance and whether this task should delegate through Overflow.",
-          inputSchema: { type: "object", properties: {}, additionalProperties: false },
-          annotations: {
-            readOnlyHint: true,
-            destructiveHint: false,
-            idempotentHint: true,
-            openWorldHint: false,
-          },
-        },
         {
           name: DELEGATE_TOOL,
           title: "Delegate work through Overflow",
@@ -782,7 +718,6 @@ async function handleRequest(message) {
 
   if (method === "tools/call") {
     try {
-      if (params?.name === USAGE_TOOL) return sendResult(id, await callUsage());
       if (params?.name === DELEGATE_TOOL) return sendResult(id, await callDelegate(params));
       if (params?.name === CLAIM_TOOL) return sendResult(id, await callClaim(params));
       if (params?.name === RETURN_TOOL) return sendResult(id, await callReturn(params));
