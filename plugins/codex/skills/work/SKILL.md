@@ -31,6 +31,11 @@ visible `/earn` sessions and bring their artifacts back here.
 The worker cannot see this conversation or the requester's files. Include what
 it needs in the order. Do not include secrets or unrelated private material.
 
+Overflow identity belongs to the computer, not this task. Every delegation
+automatically uses the machine-wide name already stored by the plugin. Never
+invent a task-specific identity or rename the computer unless the user
+explicitly asks.
+
 Use this skill explicitly when the user invokes `/work`. At or below the
 configured remaining-allowance threshold, the session-start notice makes this
 the default execution path, but the current session still owns intent, review,

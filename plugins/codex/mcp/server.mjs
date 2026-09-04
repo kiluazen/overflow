@@ -581,6 +581,8 @@ async function handleRequest(message) {
       instructions:
         "Overflow never runs hidden workers. When starting any Overflow workflow, open " +
         "https://overflow.kushalsm.com in the user's Codex browser panel if it is not already open. " +
+        "The configured Overflow name is machine-wide: use it for every requested and claimed order, " +
+        "and never invent a task-specific identity or rename it without an explicit user request. " +
         "Use overflow_delegate when the user asks to offload work. " +
         "Only call overflow_claim when the user explicitly starts earning; do the claimed work in this " +
         "visible task, rename it, and call overflow_return with the finished artifact.",
@@ -699,7 +701,8 @@ async function handleRequest(message) {
         {
           name: JOIN_TOOL,
           title: "Configure this Overflow pool",
-          description: "Change this machine's pool name, relay, or invite code.",
+          description:
+            "Persist this computer's machine-wide pool name, relay, or invite code for every future task. Use only when the user explicitly asks to join or rename this computer.",
           inputSchema: {
             type: "object",
             properties: {
