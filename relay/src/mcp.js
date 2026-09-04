@@ -99,13 +99,14 @@ function inboxText(result) {
 
 function createOverflowServer(env) {
   const server = new McpServer(
-    { name: "Overflow", version: "0.6.0" },
+    { name: "Overflow", version: "0.6.1" },
     {
       instructions:
         "Overflow is a remote, authenticated task pool. It never launches local executors or background processes. " +
         "Use overflow_delegate once to send work and end the requester turn without polling. " +
         "Use overflow_inbox to recover returned work without a batch ID. " +
-        "Workers use overflow_claim, work only inside ~/Overflow earn, overflow_prepare_upload for every file, and overflow_return.",
+        "Workers use overflow_claim, work only inside ~/Overflow earn, overflow_prepare_upload for every file, and overflow_return. " +
+        "A claim lasts 90 minutes; abandoned work is automatically offered to another worker and refunded after two expired claims.",
     },
   );
 

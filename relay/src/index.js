@@ -24,6 +24,12 @@ const INBOX_ARTIFACT_CHARS = 20_000;
 const MAX_USER_BATCHES = 50;
 const STARTING_CREDITS = 1_000;
 const ORDER_CREDITS = 100;
+// A claimed job cannot disappear forever with a friend's closed laptop. The
+// worker gets long enough for a substantial Codex task, then the order is
+// offered to somebody else. Two abandoned claims end the order and release
+// the requester's held credits.
+const REMOTE_CLAIM_TTL_MS = 90 * 60 * 1000;
+const MAX_REMOTE_CLAIM_ATTEMPTS = 2;
 
 function safeFileName(value) {
   const name = String(value || "artifact").replace(/[\r\n"\\/]/g, "_").trim();
@@ -157,9 +163,25 @@ export class Pool {
     // busy worker, which looked like orders that were submitted and simply
     // never ran.
     this.queue = [];
+    // Durable Objects are single-location, but async request handlers can still
+    // overlap. Serialize account/job transitions so two claims or duplicate
+    // returns cannot observe the same pre-mutation state.
+    this.remoteLock = Promise.resolve();
     this.state.blockConcurrencyWhile(async () => {
       this.queue = (await this.state.storage.get("queue")) || [];
     });
+  }
+
+  async withRemoteLock(action) {
+    const prior = this.remoteLock;
+    let release;
+    this.remoteLock = new Promise((resolve) => { release = resolve; });
+    await prior;
+    try {
+      return await action();
+    } finally {
+      release();
+    }
   }
 
   // A bounded log of what the relay already sees pass through it: an order
@@ -272,6 +294,7 @@ export class Pool {
       reserved: Number(account.reserved || 0),
       earned: Number(account.earned || 0),
       spent: Number(account.spent || 0),
+      refunded: Number(account.refunded || 0),
       delegated: Number(account.delegated || 0),
       completed: Number(account.completed || 0),
       createdAt: Number(account.createdAt || 0),
@@ -291,16 +314,127 @@ export class Pool {
       credits: Number(job.creditCost || 0),
       createdAt: Number(job.createdAt || 0),
       claimedAt: Number(job.claimedAt || 0),
+      leaseExpiresAt: Number(job.leaseExpiresAt || 0),
+      attempts: Number(job.attempts || 0),
       completedAt: Number(job.completedAt || 0),
-      artifact: String(job.result?.artifact || "").slice(0, ARTIFACT_PREVIEW_CHARS),
       artifactChars: String(job.result?.artifact || "").length,
       files: (job.result?.files || []).map((file) => safeFileName(file?.name)),
     };
   }
 
+  publicEvent(event) {
+    const { artifact: _artifact, ...safe } = event;
+    return safe;
+  }
+
   async remoteJobs() {
     const entries = await this.state.storage.list({ prefix: "remote-job:" });
     return [...entries.values()];
+  }
+
+  async scheduleNextRemoteLease(jobs) {
+    if (typeof this.state.storage.setAlarm !== "function") return;
+    const active = (jobs || await this.remoteJobs())
+      .filter((job) => job.status === "claimed")
+      .map((job) => Number(job.leaseExpiresAt || (Number(job.claimedAt || 0) + REMOTE_CLAIM_TTL_MS)))
+      .filter((at) => at > 0)
+      .sort((left, right) => left - right);
+    if (active.length) {
+      await this.state.storage.setAlarm(active[0]);
+    } else if (typeof this.state.storage.deleteAlarm === "function") {
+      await this.state.storage.deleteAlarm();
+    }
+  }
+
+  async refundRemoteJob(job) {
+    const creditCost = Number(job.creditCost || 0);
+    const requester = await this.ensureAccount({
+      userId: job.requesterUserId,
+      displayName: job.requesterName,
+      email: job.requesterEmail,
+    });
+    requester.reserved = Math.max(0, Number(requester.reserved || 0) - creditCost);
+    requester.balance = Number(requester.balance || 0) + creditCost;
+    requester.refunded = Number(requester.refunded || 0) + creditCost;
+    await this.saveAccount(requester);
+    return requester;
+  }
+
+  async reconcileRemoteClaims(now = Date.now()) {
+    const jobs = await this.remoteJobs();
+    const expired = jobs.filter((job) => {
+      if (job.status !== "claimed") return false;
+      const expiresAt = Number(job.leaseExpiresAt || (Number(job.claimedAt || 0) + REMOTE_CLAIM_TTL_MS));
+      return expiresAt > 0 && expiresAt <= now;
+    });
+
+    if (!expired.length) {
+      await this.scheduleNextRemoteLease(jobs);
+      return { requeued: 0, failed: 0 };
+    }
+
+    let requeued = 0;
+    let failed = 0;
+    for (const job of expired) {
+      // Remove a stale copy before either requeueing or closing the job.
+      this.queue = this.queue.filter((queued) => queued.id !== job.id);
+      const attempts = Math.max(1, Number(job.attempts || 1));
+      if (attempts >= MAX_REMOTE_CLAIM_ATTEMPTS) {
+        await this.refundRemoteJob(job);
+        const closed = {
+          ...job,
+          status: "failed",
+          completedAt: now,
+          leaseExpiresAt: undefined,
+          result: {
+            artifact: `Overflow closed this order after ${attempts} workers claimed it without returning a result.`,
+            files: [],
+          },
+        };
+        await this.state.storage.put(this.remoteJobKey(job.id), closed);
+        await this.recordEvent({
+          type: "expired",
+          jobId: job.id,
+          objective: String(job.order?.objective || ""),
+          requester: job.requesterName,
+          worker: job.workerName,
+          credits: Number(job.creditCost || 0),
+          creditState: "refunded",
+        });
+        failed += 1;
+        continue;
+      }
+
+      const queued = {
+        ...job,
+        status: "queued",
+        workerUserId: undefined,
+        workerName: undefined,
+        workerEmail: undefined,
+        claimedAt: undefined,
+        leaseExpiresAt: undefined,
+        lastExpiredAt: now,
+      };
+      await this.state.storage.put(this.remoteJobKey(job.id), queued);
+      this.queue.push(queued);
+      await this.recordEvent({
+        type: "requeued",
+        jobId: job.id,
+        objective: String(job.order?.objective || ""),
+        requester: job.requesterName,
+        worker: job.workerName,
+        credits: Number(job.creditCost || 0),
+        creditState: "reserved",
+      });
+      requeued += 1;
+    }
+    await this.saveQueue();
+    await this.scheduleNextRemoteLease();
+    return { requeued, failed };
+  }
+
+  async alarm() {
+    await this.withRemoteLock(() => this.reconcileRemoteClaims());
   }
 
   async cleanupExpiredCapabilities() {
@@ -387,8 +521,13 @@ export class Pool {
   }
 
   async handleRemote(request, url) {
+    return this.withRemoteLock(() => this.handleRemoteUnlocked(request, url));
+  }
+
+  async handleRemoteUnlocked(request, url) {
     const actor = this.actor(request);
     if (!actor.userId) return Response.json({ error: "missing authenticated actor" }, { status: 401 });
+    await this.reconcileRemoteClaims();
     const actorAccount = await this.ensureAccount(actor);
 
     if (url.pathname === "/rpc/account-init" || url.pathname === "/rpc/account") {
@@ -486,9 +625,12 @@ export class Pool {
         workerName: actor.displayName,
         workerEmail: actor.email,
         claimedAt: Date.now(),
+        leaseExpiresAt: Date.now() + REMOTE_CLAIM_TTL_MS,
+        attempts: Number(job.attempts || 0) + 1,
       };
       await this.saveQueue();
       await this.state.storage.put(this.remoteJobKey(job.id), claimed);
+      await this.scheduleNextRemoteLease();
       await this.recordEvent({
         type: "claimed",
         jobId: job.id,
@@ -602,6 +744,7 @@ export class Pool {
         },
       };
       await this.state.storage.put(this.remoteJobKey(job.id), completed);
+      await this.scheduleNextRemoteLease();
       await this.recordEvent({
         type: status === "failed" ? "failed" : "returned",
         jobId: job.id,
@@ -744,6 +887,7 @@ export class Pool {
     }
 
     if (url.pathname === "/api/activity") {
+      await this.withRemoteLock(() => this.reconcileRemoteClaims());
       const events = (await this.state.storage.get("events")) || [];
       const remoteJobs = (await this.remoteJobs())
         .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
@@ -807,7 +951,7 @@ export class Pool {
           machines: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
           online: sockets.length,
           idle: sockets.filter((s) => !s.busy).length,
-          events,
+          events: events.map((event) => this.publicEvent(event)),
         },
         { headers: { "access-control-allow-origin": "*", "cache-control": "no-store" } },
       );

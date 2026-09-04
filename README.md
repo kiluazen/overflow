@@ -51,7 +51,10 @@ task or batch ID was lost.
 a hidden child, another task, or a subagent. If the pool is empty, it says so
 and ends without polling. Before claiming, it establishes `~/Overflow earn` as
 its only local workspace. Each job gets a subfolder there; the worker must not
-read or write anywhere else.
+read or write anywhere else. Claims last 90 minutes. An abandoned claim is
+offered to one more worker; a second abandoned claim closes the order and
+refunds the requester automatically. Durable Object alarms enforce this without
+model polling or a process on either laptop.
 
 The worker cannot see the requester's conversation or local files. Orders must
 carry their own context. Returned text and file bytes travel through Overflow;
@@ -75,6 +78,9 @@ expiring download links.
 
 The proposed friends-only routing layer is described in
 [`docs/friends-system.md`](docs/friends-system.md).
+
+The exact small-group dogfood run is in
+[`docs/morning-trial.md`](docs/morning-trial.md).
 
 ## Development
 

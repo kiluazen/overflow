@@ -5,6 +5,7 @@ import { Pool } from "../src/index.js";
 class MemoryStorage {
   constructor() {
     this.values = new Map();
+    this.alarmAt = null;
   }
 
   async get(key) {
@@ -21,6 +22,18 @@ class MemoryStorage {
 
   async list({ prefix }) {
     return new Map([...this.values].filter(([key]) => key.startsWith(prefix)));
+  }
+
+  async setAlarm(at) {
+    this.alarmAt = Number(at);
+  }
+
+  async getAlarm() {
+    return this.alarmAt;
+  }
+
+  async deleteAlarm() {
+    this.alarmAt = null;
   }
 }
 
@@ -357,6 +370,8 @@ test("public activity never exposes private artifact URLs", async () => {
   expect(returned.files).toEqual(["deck.pptx"]);
   expect(JSON.stringify(activity)).not.toContain("/api/artifacts/");
   expect(JSON.stringify(activity)).not.toContain("remote-artifacts/");
+  expect(JSON.stringify(activity)).not.toContain("Deck complete.");
+  expect(activity.jobs[0]).toMatchObject({ artifactChars: 14, files: ["deck.pptx"] });
 });
 
 test("legacy local file paths are reported as unavailable instead of linked", async () => {
@@ -387,4 +402,126 @@ test("legacy local file paths are reported as unavailable instead of linked", as
     unavailable: true,
   });
   expect(inbox.batches[0].jobs[0].result.files[0].url).toBeUndefined();
+});
+
+test("three identities can claim different orders without crossing ownership", async () => {
+  const state = new MemoryState();
+  const pool = new Pool(state, {});
+  await state.ready;
+  const order = (objective) => ({
+    objective,
+    context: "Self-contained context.",
+    expectedArtifact: "A short memo",
+    acceptanceTest: "Return the requested memo",
+  });
+  const submitted = await (await remote(pool, "/rpc/submit", "requester-a", "Kushal", {
+    orders: [order("Research market A"), order("Research market B")],
+  })).json();
+
+  const [firstResponse, secondResponse] = await Promise.all([
+    remote(pool, "/rpc/claim", "worker-b", "Yash", {}),
+    remote(pool, "/rpc/claim", "worker-c", "Aparna", {}),
+  ]);
+  const first = await firstResponse.json();
+  const second = await secondResponse.json();
+  expect([first.id, second.id]).toEqual(submitted.jobs);
+  expect(first.id).not.toBe(second.id);
+  expect((await remote(pool, "/rpc/claim", "worker-d", "Lakshya", {})).status).toBe(204);
+
+  const crossed = await remote(pool, "/rpc/return", "worker-c", "Aparna", {
+    jobId: first.id,
+    artifact: "Wrong worker result",
+  });
+  expect(crossed.status).toBe(403);
+
+  expect((await remote(pool, "/rpc/return", "worker-b", "Yash", {
+    jobId: first.id,
+    artifact: "Market A memo",
+  })).status).toBe(200);
+  expect((await remote(pool, "/rpc/return", "worker-c", "Aparna", {
+    jobId: second.id,
+    artifact: "Market B memo",
+  })).status).toBe(200);
+
+  const requester = await (await remote(pool, "/rpc/account", "requester-a", "Kushal")).json();
+  const workerB = await (await remote(pool, "/rpc/account", "worker-b", "Yash")).json();
+  const workerC = await (await remote(pool, "/rpc/account", "worker-c", "Aparna")).json();
+  expect(requester.account).toMatchObject({ balance: 800, reserved: 0, spent: 200 });
+  expect(workerB.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
+  expect(workerC.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
+});
+
+test("abandoned claims requeue once, then fail and refund without polling", async () => {
+  const state = new MemoryState();
+  const pool = new Pool(state, {});
+  await state.ready;
+  const order = {
+    objective: "Finish a bounded artifact",
+    context: "Everything needed is here.",
+    expectedArtifact: "A memo",
+    acceptanceTest: "Memo is returned",
+  };
+  const submitted = await (await remote(pool, "/rpc/submit", "requester-a", "Kushal", {
+    orders: [order],
+  })).json();
+  const first = await (await remote(pool, "/rpc/claim", "worker-b", "Yash", {})).json();
+  expect(first.attempts).toBe(1);
+  expect(first.leaseExpiresAt).toBeGreaterThan(Date.now());
+  expect(await state.storage.getAlarm()).toBe(first.leaseExpiresAt);
+
+  const expiredFirst = await state.storage.get(`remote-job:${first.id}`);
+  expiredFirst.leaseExpiresAt = Date.now() - 1;
+  await state.storage.put(`remote-job:${first.id}`, expiredFirst);
+  await pool.alarm();
+
+  const second = await (await remote(pool, "/rpc/claim", "worker-c", "Aparna", {})).json();
+  expect(second.id).toBe(first.id);
+  expect(second.attempts).toBe(2);
+  expect(second.workerName).toBe("Aparna");
+  const staleReturn = await remote(pool, "/rpc/return", "worker-b", "Yash", {
+    jobId: first.id,
+    artifact: "Late first attempt",
+  });
+  expect(staleReturn.status).toBe(403);
+
+  const expiredSecond = await state.storage.get(`remote-job:${second.id}`);
+  expiredSecond.leaseExpiresAt = Date.now() - 1;
+  await state.storage.put(`remote-job:${second.id}`, expiredSecond);
+  await pool.alarm();
+
+  const inbox = await (await remote(pool, "/rpc/inbox", "requester-a", "Kushal")).json();
+  expect(inbox.batches[0]).toMatchObject({ batch: submitted.batch, complete: true });
+  expect(inbox.batches[0].jobs[0]).toMatchObject({ status: "failed" });
+  expect(inbox.batches[0].jobs[0].result.artifact).toContain("2 workers claimed it");
+  const requester = await (await remote(pool, "/rpc/account", "requester-a", "Kushal")).json();
+  expect(requester.account).toMatchObject({ balance: 1000, reserved: 0, refunded: 100, spent: 0 });
+  expect(await state.storage.getAlarm()).toBeNull();
+  expect(pool.queue).toHaveLength(0);
+
+  const activity = await (await pool.fetch(new Request("https://overflow.internal/api/activity"))).json();
+  expect(activity.events.filter((event) => event.jobId === first.id).map((event) => event.type))
+    .toEqual(expect.arrayContaining(["claimed", "requeued", "expired"]));
+});
+
+test("concurrent duplicate returns transfer credits exactly once", async () => {
+  const state = new MemoryState();
+  const pool = new Pool(state, {});
+  await state.ready;
+  const order = {
+    objective: "Return once",
+    context: "",
+    expectedArtifact: "A result",
+    acceptanceTest: "No duplicate payment",
+  };
+  await remote(pool, "/rpc/submit", "requester-a", "Kushal", { orders: [order] });
+  const claimed = await (await remote(pool, "/rpc/claim", "worker-b", "Yash", {})).json();
+  const [left, right] = await Promise.all([
+    remote(pool, "/rpc/return", "worker-b", "Yash", { jobId: claimed.id, artifact: "Done" }),
+    remote(pool, "/rpc/return", "worker-b", "Yash", { jobId: claimed.id, artifact: "Done" }),
+  ]);
+  const returns = [await left.json(), await right.json()];
+  expect(returns.filter((result) => result.creditsEarned === 100)).toHaveLength(1);
+  expect(returns.filter((result) => result.alreadyStored)).toHaveLength(1);
+  const worker = await (await remote(pool, "/rpc/account", "worker-b", "Yash")).json();
+  expect(worker.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
 });
