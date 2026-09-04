@@ -68,7 +68,9 @@ try {
     arguments: { timeoutSeconds: 60 },
   });
   assert.equal(claimed.structuredContent.claimed, true);
+  assert.equal(claimed.structuredContent.requester, "visible-test-requester");
   assert.equal(claimed.structuredContent.order.objective, order.objective);
+  assert.match(claimed.content[0].text, /Requested by: visible-test-requester/);
   assert.match(claimed.structuredContent.suggestedTitle, /^Overflow: tsk [0-9a-f]{4} /);
 
   const jobId = claimed.structuredContent.jobId;

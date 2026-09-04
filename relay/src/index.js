@@ -134,7 +134,13 @@ export class Pool {
       const inFlight = [];
       for (const ws of this.socketsTagged("earner")) {
         const meta = this.meta(ws);
-        if (meta.job) inFlight.push({ jobId: meta.job.id, worker: meta.name || "anon" });
+        if (meta.job) {
+          inFlight.push({
+            jobId: meta.job.id,
+            requester: meta.job.requesterName || "someone",
+            worker: meta.name || "anon",
+          });
+        }
       }
       return Response.json(
         {
@@ -146,6 +152,7 @@ export class Pool {
           waiting: this.queue.map((job) => ({
             jobId: job.id,
             objective: String(job.order?.objective ?? ""),
+            requester: job.requesterName || "someone",
             attempts: job.attempts || 0,
           })),
           inFlight,
@@ -248,12 +255,20 @@ export class Pool {
       const batch = crypto.randomUUID();
       for (const [index, order] of orders.entries()) {
         const id = crypto.randomUUID();
-        this.queue.push({ id, batch, index, requester: meta.connectionId, order });
+        const requesterName = meta.name || "someone";
+        this.queue.push({
+          id,
+          batch,
+          index,
+          requester: meta.connectionId,
+          requesterName,
+          order,
+        });
         await this.recordEvent({
           type: "queued",
           jobId: id,
           objective: String(order?.objective ?? ""),
-          from: meta.name || "someone",
+          requester: requesterName,
         });
       }
       await this.saveQueue();
@@ -324,10 +339,16 @@ export class Pool {
           batch: job.batch,
           index: job.index,
           requester: job.requester,
+          requesterName: job.requesterName || "someone",
         },
       });
       await this.state.storage.put(this.inFlightKey(job.id), job);
-      this.send(earner, { type: "job", id: job.id, order: job.order });
+      this.send(earner, {
+        type: "job",
+        id: job.id,
+        requester: job.requesterName || "someone",
+        order: job.order,
+      });
       this.send(requester, {
         type: "progress",
         job: job.id,
@@ -339,6 +360,7 @@ export class Pool {
         type: "claimed",
         jobId: job.id,
         objective: String(job.order?.objective ?? ""),
+        requester: job.requesterName || "someone",
         worker: earnerMeta.name,
       });
     }
@@ -380,6 +402,7 @@ export class Pool {
       type: message.status === "failed" ? "failed" : "returned",
       jobId: job.id,
       objective: String(stored?.order?.objective ?? job.order?.objective ?? ""),
+      requester: stored?.requesterName || job.requesterName || "someone",
       worker: meta.name,
       delivered: Boolean(requester),
       artifactChars: artifact.length,

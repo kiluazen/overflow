@@ -337,6 +337,7 @@ function claimOne(cfg, progressToken, timeoutSeconds) {
           order: message.order,
           socket,
           worker: cfg.name,
+          requester: message.requester || "someone",
         };
         notify(progressToken, 1, 1, `claimed task ${message.id.slice(0, 4)}`);
         finish(null, activeClaim, false);
@@ -369,6 +370,7 @@ function renderClaim(job) {
         type: "text",
         text:
           `Claimed Overflow task ${job.id}.\n\n` +
+          `Requested by: ${job.requester || "someone"}\n\n` +
           `Rename this visible Codex task to: ${title}\n\n` +
           `# Objective\n${job.order.objective}\n\n` +
           `# Context\n${job.order.context || "No additional context supplied."}\n\n` +
@@ -383,6 +385,7 @@ function renderClaim(job) {
       jobId: job.id,
       shortId: job.id.slice(0, 4),
       suggestedTitle: title,
+      requester: job.requester || "someone",
       order: job.order,
     },
   };

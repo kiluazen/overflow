@@ -97,14 +97,20 @@ var render = function (d) {
 
   var rows = [];
   (d.waiting || []).forEach(function (w) {
-    rows.push({ state: "waiting", objective: w.objective, by: "" });
+    rows.push({
+      state: "waiting",
+      objective: w.objective,
+      by: w.requester ? "asked by " + w.requester : "",
+    });
   });
   (d.events || []).forEach(function (e) {
     if (e.type === "queued") return;
     rows.push({
       state: e.type === "claimed" ? "working" : e.type,
       objective: e.objective,
-      by: e.worker || "",
+      by: e.worker
+        ? "asked by " + (e.requester || "someone") + " · run by " + e.worker
+        : e.requester ? "asked by " + e.requester : "",
       artifact: e.artifact,
       files: e.files,
       jobId: e.jobId,
