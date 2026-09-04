@@ -15,7 +15,41 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
+import {
+  DEFAULT_RELAY,
+  connect as joinPool,
+  readConfig,
+  writeConfig,
+  RECONNECT_MIN_MS,
+} from "../lib/earner.mjs";
+
 const TOOL = "overflow_delegate";
+const PAIR_TOOL = "overflow_join";
+const STATUS_TOOL = "overflow_pool";
+
+// Whether this session is also carrying work for other people. Codex starts this
+// server at session start and keeps it alive for the session, so joining the
+// pool here means a friend never runs anything: they install the plugin, and
+// their machine is available for as long as they have Codex open.
+let earning = false;
+// Set by the session-start hook's own reading of the account, passed through the
+// environment: below the trigger this machine is a requester, not a worker.
+const lowOnAllowance = process.env.OVERFLOW_LOW === "1";
+
+function startEarning() {
+  if (earning || process.env.OVERFLOW_EARN === "0") return false;
+  const cfg = readConfig();
+  if (!cfg.relay || !cfg.token) return false;
+  // A session that is itself about to delegate has no allowance to spare, so it
+  // joins as a requester only.
+  if (lowOnAllowance) return false;
+  earning = true;
+  // Several Codex windows means several of these; the suffix keeps them apart
+  // in the pool while still showing the person's name.
+  const name = `${cfg.name || os.hostname()}`;
+  joinPool({ ...cfg, name }, { backoff: RECONNECT_MIN_MS, completed: 0 });
+  return true;
+}
 const INVALID_PARAMS = -32602;
 const METHOD_NOT_FOUND = -32601;
 
@@ -293,6 +327,80 @@ async function callDelegate(params) {
   };
 }
 
+async function callJoin(params) {
+  const args = params.arguments ?? {};
+  const inviteCode = requireString(args.inviteCode, "inviteCode");
+  const relay =
+    typeof args.relay === "string" && args.relay.trim() ? args.relay.trim() : DEFAULT_RELAY;
+  const name =
+    typeof args.name === "string" && args.name.trim() ? args.name.trim() : os.hostname();
+
+  // Check the code before storing it, so a typo fails here rather than silently
+  // leaving someone in a pool of one.
+  const check = new URL("/status", relay);
+  check.searchParams.set("token", inviteCode);
+  const response = await fetch(check, { signal: AbortSignal.timeout(10_000) });
+  if (response.status === 401) {
+    throw new Error("That invite code was not accepted by the relay. Check it with whoever runs the pool.");
+  }
+  if (!response.ok) throw new Error(`The relay answered ${response.status}.`);
+  const pool = await response.json();
+
+  writeConfig({ relay, token: inviteCode, name });
+  const started = startEarning();
+
+  const others =
+    (pool.workers || []).map((w) => w.name).filter((n) => n !== name).join(", ") ||
+    "nobody else yet";
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Joined the pool as "${name}". Already online: ${others}.\n\n` +
+          (started
+            ? "This machine now takes work for the pool whenever Codex is open, and stops when it is closed. " +
+              "Nothing else to run."
+            : "Work-sharing is switched off here (OVERFLOW_EARN=0), so this machine will delegate but not take jobs.") +
+          "\n\nWhen this account drops below 25% allowance, sessions start delegating to the pool automatically.",
+      },
+    ],
+    structuredContent: { joined: true, name, relay, earning: started, poolSize: pool.earners ?? 0 },
+  };
+}
+
+async function callPool() {
+  const cfg = config();
+  if (!cfg.relay || !cfg.token) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: "Not in a pool yet. Ask whoever runs one for an invite code, then use the overflow_join tool.",
+        },
+      ],
+      structuredContent: { joined: false },
+    };
+  }
+  const pool = await poolStatus(cfg);
+  const names = (pool.workers || []).map(
+    (w) =>
+      `${w.name}${w.sessions > 1 ? ` (${w.sessions} sessions)` : ""}${w.busy ? " — busy" : ""}`,
+  );
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `${pool.machines ?? pool.earners} machine(s) online: ${names.join(", ") || "none"}.\n` +
+          `${pool.idle} free, ${pool.queued} order(s) waiting.\n` +
+          `This machine is ${earning ? "taking work for the pool" : "not taking work"}.`,
+      },
+    ],
+    structuredContent: { ...pool, thisMachineEarning: earning },
+  };
+}
+
 const ORDER_SCHEMA = {
   type: "object",
   properties: {
@@ -336,9 +444,43 @@ async function handleRequest(message) {
 
   if (method === "ping") return sendResult(id, {});
 
+  if (method === "notifications/initialized" || method === "initialized") {
+    // The session is up; take work for other people from here on.
+    startEarning();
+    return;
+  }
+
   if (method === "tools/list") {
     sendResult(id, {
       tools: [
+        {
+          name: PAIR_TOOL,
+          title: "Join an Overflow pool",
+          description:
+            "Join a friend's Overflow pool using the invite code they gave you. Call this when the user " +
+            "wants to join, be added to, or set up an Overflow pool. After this, their machine takes work " +
+            "for the pool whenever they have Codex open, and their own sessions can delegate when they run low.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inviteCode: { type: "string", description: "The invite code the pool owner gave the user." },
+              name: { type: "string", description: "What to call this machine in the pool. Defaults to the hostname." },
+              relay: { type: "string", description: "Only for a pool that is not on the default relay." },
+            },
+            required: ["inviteCode"],
+            additionalProperties: false,
+          },
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+        },
+        {
+          name: STATUS_TOOL,
+          title: "Show the Overflow pool",
+          description:
+            "Show who is currently online in the user's Overflow pool and whether this machine is taking work. " +
+            "Call this when the user asks about their pool, who is available, or whether Overflow is working.",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+        },
         {
           name: TOOL,
           title: "Delegate through Overflow",
@@ -379,10 +521,12 @@ async function handleRequest(message) {
   }
 
   if (method === "tools/call") {
-    if (params?.name !== TOOL) {
-      return sendError(id, INVALID_PARAMS, `Unknown tool: ${params?.name ?? ""}`);
-    }
     try {
+      if (params?.name === PAIR_TOOL) return sendResult(id, await callJoin(params));
+      if (params?.name === STATUS_TOOL) return sendResult(id, await callPool());
+      if (params?.name !== TOOL) {
+        return sendError(id, INVALID_PARAMS, `Unknown tool: ${params?.name ?? ""}`);
+      }
       sendResult(id, await callDelegate(params));
     } catch (error) {
       sendError(

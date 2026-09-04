@@ -79,16 +79,28 @@ export class Pool {
     const url = new URL(request.url);
 
     if (url.pathname === "/status") {
-      const earners = this.socketsTagged("earner").map((ws) => {
+      const sockets = this.socketsTagged("earner").map((ws) => {
         const meta = this.meta(ws);
         return { name: meta.name || "anon", busy: Boolean(meta.busy) };
       });
+      // One person with three Codex windows is three sockets but one machine,
+      // and listing the same name three times reads like a bug. Group them.
+      const byName = new Map();
+      for (const socket of sockets) {
+        const entry = byName.get(socket.name) || { name: socket.name, sessions: 0, busy: 0 };
+        entry.sessions += 1;
+        entry.busy += socket.busy ? 1 : 0;
+        byName.set(socket.name, entry);
+      }
+      const workers = [...byName.values()]
+        .map((w) => ({ ...w, busy: w.busy > 0 && w.busy === w.sessions }))
+        .sort((a, b) => a.name.localeCompare(b.name));
       return Response.json({
-        earners: earners.length,
-        idle: earners.filter((e) => !e.busy).length,
+        earners: sockets.length,
+        machines: workers.length,
+        idle: sockets.filter((s) => !s.busy).length,
         queued: this.queue.length,
-        // Named, so a pool owner can see who is actually in it.
-        workers: earners.sort((a, b) => a.name.localeCompare(b.name)),
+        workers,
       });
     }
 

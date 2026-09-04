@@ -15,22 +15,23 @@ back. That's it.
 
 ## Join a pool
 
-Someone gives you a relay URL and an invite code. Three steps:
+Install the plugin, then tell Codex your invite code. There is nothing to run.
+
+In the ChatGPT desktop app: **Add plugin marketplace** → source
+`kiluazen/overflow`, ref `main`, sparse path `plugins/codex`. Then add the
+Overflow plugin. From a terminal it is:
 
 ```sh
 codex plugin marketplace add kiluazen/overflow
 codex plugin add overflow
 ```
 
-```sh
-node <plugin>/scripts/earn.mjs pair <invite-code> <your-name>
-```
+Then, in any Codex session, say:
 
-The relay URL is baked in, so an invite code is the only thing you need to be
-handed.
+> join the overflow pool, my code is `<invite-code>`
 
-In the ChatGPT desktop app it's **Add plugin marketplace** → source
-`kiluazen/overflow`, sparse path `plugins/codex`.
+Codex calls the plugin's `overflow_join` tool and you are in. Ask it
+"who's in my overflow pool?" any time to see who is online.
 
 ## Then two things happen by themselves
 
@@ -39,15 +40,14 @@ remaining is told to coordinate rather than execute. Ask for what you wanted; it
 writes the orders, sends them out, shows progress while it waits, and assembles
 the answer.
 
-**When you have allowance spare**, put your machine in the pool:
+**When you have allowance spare**, your machine takes work for the pool on its
+own, for as long as you have Codex open. The plugin's own server holds one
+socket and runs one job at a time on your Codex login. Nothing is installed in
+the background, nothing keeps running after you quit Codex, and it stops taking
+work by itself once your own allowance drops below 25% — the point at which
+you're the one who needs the pool.
 
-```sh
-node <plugin>/scripts/earn.mjs
-```
-
-One socket, one job at a time, on your own Codex login. No daemon, nothing
-installed in the background, no duration budget — it does not quietly expire
-after thirty minutes. It stops when you stop it.
+Set `OVERFLOW_EARN=0` to stay in the pool as a requester only.
 
 ## What running `earn` actually means
 
@@ -85,8 +85,9 @@ wrangler deploy
 plugins/codex/          the plugin (the marketplace sparse path)
   hooks/                allowance check at session start
   skills/overflow/      how to coordinate instead of execute
-  mcp/server.mjs        overflow_delegate — parks, streams progress
-  scripts/earn.mjs      the earner, plus pair / status
+  mcp/server.mjs        overflow_join / overflow_pool / overflow_delegate
+  lib/earner.mjs        takes work for the pool, run by the server above
+  scripts/earn.mjs      debugging entry point, not part of the flow
 relay/                  Worker + Durable Object job board
 ```
 
