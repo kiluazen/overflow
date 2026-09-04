@@ -38,7 +38,9 @@ Start a fresh Codex task after installation so its skills and tools load.
 ## Give work: `/work`
 
 Run `/work` or ask Codex to offload a task. Overflow turns each independent
-piece into a self-contained order and calls `overflow_delegate` once. The
+piece into a self-contained order and calls `overflow_delegate` once. It first
+checks the pool and never creates more orders than currently idle earning
+sessions; with one or zero waiting earners, the whole task stays one order. The
 requesting task parks while it waits, so it does not spend allowance narrating
 the wait.
 
