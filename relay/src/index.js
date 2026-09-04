@@ -1,4 +1,5 @@
 import { BOARD_HTML } from "./board.js";
+import { BG_JPEG_BASE64 } from "./bg.js";
 
 // Overflow relay: one Durable Object holding the job board.
 //
@@ -33,7 +34,7 @@ export default {
     // The board and the feed it reads are deliberately open: this pool is a
     // few friends and the point is being able to watch it work. Everything that
     // moves an order still needs the token.
-    const publicPaths = new Set(["/", "/board", "/api/activity"]);
+    const publicPaths = new Set(["/", "/board", "/bg.jpg", "/api/activity"]);
     if (!expected || token.length !== expected.length || token !== expected) {
       if (!publicPaths.has(url.pathname)) return unauthorized("bad or missing token");
     }
@@ -47,6 +48,17 @@ export default {
         return new Response(BOARD_HTML, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
+      case "/bg.jpg": {
+        const binary = atob(BG_JPEG_BASE64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        return new Response(bytes, {
+          headers: {
+            "content-type": "image/jpeg",
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+        });
+      }
       case "/api/activity":
       case "/earn":
       case "/delegate":
