@@ -26,7 +26,9 @@ visible `/earn` sessions and bring their artifacts back here.
 5. If Codex task heartbeats are available, create one attached to this task:
    - Name it exactly `Overflow <batch UUID>`. Its automation ID will therefore
      be `overflow-<batch UUID>`.
-   - Schedule it with `FREQ=MINUTELY;INTERVAL=20;COUNT=3`.
+   - Schedule it with `FREQ=MINUTELY;INTERVAL=20;COUNT=4`. Codex counts the
+     creation-time occurrence, so four occurrences produce three future wakes:
+     20, 40, and 60 minutes after delegation.
    - Its prompt must call `overflow_collect` exactly once for that batch. If
      incomplete, it must end without commentary or other work. If complete, it
      must review and return the result and artifact links in this task, then
