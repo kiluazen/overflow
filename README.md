@@ -13,9 +13,10 @@ call — measured on Codex 0.144.1, a 159-second wait cost the same as a call th
 failed instantly. You pay to decide what to delegate and to judge what comes
 back. That's it.
 
-## Join a pool
+## Join
 
-Install the plugin, then tell Codex your invite code. There is nothing to run.
+Install the plugin. That is the whole thing — installing it puts you in the
+pool, in both directions.
 
 In the ChatGPT desktop app: **Add plugin marketplace** → source
 `kiluazen/overflow`, ref `main`, sparse path `plugins/codex`. Then add the
@@ -26,12 +27,9 @@ codex plugin marketplace add kiluazen/overflow
 codex plugin add overflow
 ```
 
-Then, in any Codex session, say:
-
-> join the overflow pool, my code is `<invite-code>`
-
-Codex calls the plugin's `overflow_join` tool and you are in. Ask it
-"who's in my overflow pool?" any time to see who is online.
+No code to paste, nothing to run, no pairing step. Ask Codex *"who's in my
+overflow pool?"* to see who is online, or *"call this machine <name> in the
+pool"* if you would rather not appear as your hostname.
 
 ## Then two things happen by themselves
 
@@ -48,6 +46,11 @@ work by itself once your own allowance drops below 25% — the point at which
 you're the one who needs the pool.
 
 Set `OVERFLOW_EARN=0` to stay in the pool as a requester only.
+
+The pool's credential ships in the plugin, which is what makes installing it
+enough. This repository is public, so that credential is a doorbell rather than
+a lock: it stops the relay answering random internet traffic, and nothing more.
+Per-person codes are the fix if that ever matters.
 
 ## What running `earn` actually means
 

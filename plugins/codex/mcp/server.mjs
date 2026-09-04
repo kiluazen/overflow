@@ -63,19 +63,10 @@ function dataDir() {
 // .mcp.json declares, falling back to a file the user writes once. Codex does
 // not pass the parent shell's environment to MCP servers, so inheriting these
 // from a login shell silently yields undefined.
+// One source of truth with the earner: installing the plugin is joining, so a
+// machine with nothing configured is still a full member of the pool.
 function config() {
-  let stored = {};
-  const file = path.join(dataDir(), "config.json");
-  try {
-    stored = JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    // No stored config yet; environment alone may still be enough.
-  }
-  return {
-    relay: process.env.OVERFLOW_RELAY || stored.relay || "",
-    token: process.env.OVERFLOW_TOKEN || stored.token || "",
-    name: process.env.OVERFLOW_NAME || stored.name || os.hostname(),
-  };
+  return readConfig();
 }
 
 function send(message) {
@@ -277,12 +268,6 @@ function renderArtifacts(orders, artifacts) {
 async function callDelegate(params) {
   const args = params.arguments ?? {};
   const cfg = config();
-  if (!cfg.relay || !cfg.token) {
-    throw new Error(
-      "Overflow is not paired yet. Run `overflow pair <relay-url> <invite-code>` once, then retry.",
-    );
-  }
-
   const orders = normalizeOrders(args);
   const timeoutSeconds = Math.min(
     3600,
@@ -329,11 +314,15 @@ async function callDelegate(params) {
 
 async function callJoin(params) {
   const args = params.arguments ?? {};
-  const inviteCode = requireString(args.inviteCode, "inviteCode");
+  const current = config();
+  const inviteCode =
+    typeof args.inviteCode === "string" && args.inviteCode.trim()
+      ? args.inviteCode.trim()
+      : current.token;
   const relay =
-    typeof args.relay === "string" && args.relay.trim() ? args.relay.trim() : DEFAULT_RELAY;
+    typeof args.relay === "string" && args.relay.trim() ? args.relay.trim() : current.relay;
   const name =
-    typeof args.name === "string" && args.name.trim() ? args.name.trim() : os.hostname();
+    typeof args.name === "string" && args.name.trim() ? args.name.trim() : current.name;
 
   // Check the code before storing it, so a typo fails here rather than silently
   // leaving someone in a pool of one.
@@ -341,7 +330,7 @@ async function callJoin(params) {
   check.searchParams.set("token", inviteCode);
   const response = await fetch(check, { signal: AbortSignal.timeout(10_000) });
   if (response.status === 401) {
-    throw new Error("That invite code was not accepted by the relay. Check it with whoever runs the pool.");
+    throw new Error("That pool did not accept this plugin's credentials.");
   }
   if (!response.ok) throw new Error(`The relay answered ${response.status}.`);
   const pool = await response.json();
@@ -357,32 +346,19 @@ async function callJoin(params) {
       {
         type: "text",
         text:
-          `Joined the pool as "${name}". Already online: ${others}.\n\n` +
-          (started
-            ? "This machine now takes work for the pool whenever Codex is open, and stops when it is closed. " +
-              "Nothing else to run."
-            : "Work-sharing is switched off here (OVERFLOW_EARN=0), so this machine will delegate but not take jobs.") +
-          "\n\nWhen this account drops below 25% allowance, sessions start delegating to the pool automatically.",
+          `This machine is in the pool as "${name}". Also online: ${others}.\n\n` +
+          (started || earning
+            ? "It takes work for the pool whenever Codex is open, and stops when Codex is closed."
+            : "Work-sharing is off here (OVERFLOW_EARN=0), so it will delegate but not take jobs.") +
+          "\n\nBelow 25% allowance, sessions start delegating to the pool automatically.",
       },
     ],
-    structuredContent: { joined: true, name, relay, earning: started, poolSize: pool.earners ?? 0 },
+    structuredContent: { name, relay, earning: started || earning, poolSize: pool.earners ?? 0 },
   };
 }
 
 async function callPool() {
-  const cfg = config();
-  if (!cfg.relay || !cfg.token) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Not in a pool yet. Ask whoever runs one for an invite code, then use the overflow_join tool.",
-        },
-      ],
-      structuredContent: { joined: false },
-    };
-  }
-  const pool = await poolStatus(cfg);
+  const pool = await poolStatus(config());
   const names = (pool.workers || []).map(
     (w) =>
       `${w.name}${w.sessions > 1 ? ` (${w.sessions} sessions)` : ""}${w.busy ? " — busy" : ""}`,
@@ -455,19 +431,19 @@ async function handleRequest(message) {
       tools: [
         {
           name: PAIR_TOOL,
-          title: "Join an Overflow pool",
+          title: "Set how this machine appears in the pool",
           description:
-            "Join a friend's Overflow pool using the invite code they gave you. Call this when the user " +
-            "wants to join, be added to, or set up an Overflow pool. After this, their machine takes work " +
-            "for the pool whenever they have Codex open, and their own sessions can delegate when they run low.",
+            "Change the name this machine shows as in the Overflow pool, or point it at a different pool. " +
+            "Installing the plugin already joins the default pool, so this is only needed when the user wants " +
+            "to be called something other than their hostname, or is switching pools.",
           inputSchema: {
             type: "object",
             properties: {
-              inviteCode: { type: "string", description: "The invite code the pool owner gave the user." },
-              name: { type: "string", description: "What to call this machine in the pool. Defaults to the hostname." },
-              relay: { type: "string", description: "Only for a pool that is not on the default relay." },
+              name: { type: "string", description: "What to call this machine in the pool." },
+              relay: { type: "string", description: "Only when switching to a different pool's relay." },
+              inviteCode: { type: "string", description: "Only when switching to a pool that needs its own code." },
             },
-            required: ["inviteCode"],
+            required: [],
             additionalProperties: false,
           },
           annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },

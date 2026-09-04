@@ -17,6 +17,12 @@ import { spawn } from "node:child_process";
 // or paste either of them correctly at 1am.
 const DEFAULT_RELAY = "https://overflow-relay.kushalsokke.workers.dev";
 
+// The pool everyone who installs this plugin is in. It ships in the code on
+// purpose: installing the plugin IS joining, with nothing to paste and nobody to
+// ask. It keeps the relay from answering random internet traffic and nothing
+// more -- this repository is public, so treat it as a doorbell, not a lock.
+const DEFAULT_POOL_TOKEN = "tYCdZE8DOMDrQFrtqxDyz7ws";
+
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 // Cloudflare drops a WebSocket message over 1 MiB. An artifact past that limit
@@ -48,17 +54,32 @@ function configPath() {
 }
 
 function readConfig() {
+  return { ...defaultConfig(), ...storedConfig() };
+}
+
+function defaultConfig() {
+  return {
+    relay: process.env.OVERFLOW_RELAY || DEFAULT_RELAY,
+    token: process.env.OVERFLOW_TOKEN || DEFAULT_POOL_TOKEN,
+    name: process.env.OVERFLOW_NAME || os.hostname(),
+  };
+}
+
+// Only what the user actually set. Empty values must not be returned here or
+// they would spread over the defaults and un-join a machine that is fine.
+function storedConfig() {
   let stored = {};
   try {
     stored = JSON.parse(fs.readFileSync(configPath(), "utf8"));
   } catch {
-    // Not paired yet.
+    // Nothing saved: the defaults are the whole configuration, which is the
+    // normal case now that installing the plugin joins the pool.
   }
-  return {
-    relay: process.env.OVERFLOW_RELAY || stored.relay || "",
-    token: process.env.OVERFLOW_TOKEN || stored.token || "",
-    name: process.env.OVERFLOW_NAME || stored.name || os.hostname(),
-  };
+  const config = {};
+  for (const key of ["relay", "token", "name"]) {
+    if (typeof stored[key] === "string" && stored[key].trim()) config[key] = stored[key];
+  }
+  return config;
 }
 
 function writeConfig(next) {
@@ -284,6 +305,7 @@ function pair(first, second, third) {
 
 export {
   DEFAULT_RELAY,
+  DEFAULT_POOL_TOKEN,
   connect,
   log,
   readConfig,
