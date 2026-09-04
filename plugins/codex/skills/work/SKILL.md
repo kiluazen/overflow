@@ -20,10 +20,14 @@ visible `/earn` sessions and bring their artifacts back here.
    `overflow_pool` first: delegation already checks the pool. Do not browse,
    perform the work, speculate about progress, or emit repeated status messages
    before making the call.
-4. Call `overflow_delegate` exactly once with `timeoutSeconds: 1200`. It is a
-   blocking, event-driven wait: the current Codex turn parks inside the tool
-   call until an earner returns the artifact, the relay fails, or the 20-minute
-   deadline expires. Do not poll and do not duplicate the work.
+4. Normally call `overflow_delegate` exactly once with `timeoutSeconds: 1200`
+   and `waitForResult: true`. The current Codex turn stays inside that one
+   remote tool call until an earner returns the artifact, the relay fails, or
+   the 20-minute deadline expires. Waiting happens in Overflow and makes no
+   repeated model calls. Do not poll and do not duplicate the work. If there is
+   genuinely useful coordination work to do meanwhile, use
+   `waitForResult: false`, retain the returned batch ID, do that work, and call
+   `overflow_collect` once afterward.
 5. When the tool returns, review the artifact. Apply one precise correction
    through another order only when necessary. Keep the final response compact
    because the returned artifact is already visible in the tool result.
@@ -31,10 +35,8 @@ visible `/earn` sessions and bring their artifacts back here.
 The worker cannot see this conversation or the requester's files. Include what
 it needs in the order. Do not include secrets or unrelated private material.
 
-Overflow identity belongs to the computer, not this task. Every delegation
-automatically uses the machine-wide name already stored by the plugin. Never
-invent a task-specific identity or rename the computer unless the user
-explicitly asks.
+Overflow identity comes from the Google account connected during plugin
+installation. Never invent a task-specific identity.
 
 Use this skill explicitly when the user invokes `/work`. At or below the
 configured remaining-allowance threshold, the session-start notice makes this

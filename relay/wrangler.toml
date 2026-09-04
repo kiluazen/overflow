@@ -1,6 +1,7 @@
 name = "overflow-relay"
 main = "src/index.js"
 compatibility_date = "2026-04-28"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
 # Adding a custom domain turns the workers.dev route off by default, and that
 # URL is compiled into every installed plugin -- losing it takes the whole pool
@@ -17,9 +18,14 @@ custom_domain = true
 name = "POOL"
 class_name = "Pool"
 
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "e5a5d9f65e59456089597500e747126c"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Pool"]
 
-# OVERFLOW_TOKEN is the shared invite code. Set it with:
+# OVERFLOW_TOKEN is the temporary backwards-compatible friends invite code.
 #   wrangler secret put OVERFLOW_TOKEN
+# GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET configure the upstream Google login.

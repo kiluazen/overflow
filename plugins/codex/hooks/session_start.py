@@ -7,9 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
-from typing import Any
 
 # Temporary dogfood threshold. The product threshold is 10%; 80% lets us
 # exercise the orchestration loop before an account actually runs low.
@@ -27,46 +25,6 @@ def _load_probe():
     return module
 
 
-def _data_dir() -> Path:
-    return Path(os.environ.get("PLUGIN_DATA", Path(__file__).parents[1] / ".data"))
-
-
-def _append_event(event: dict[str, Any]) -> None:
-    data_dir = _data_dir()
-    try:
-        data_dir.mkdir(parents=True, exist_ok=True)
-        with (data_dir / "session-start.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, separators=(",", ":")) + "\n")
-    except OSError:
-        # Losing the log must never cost the user a session.
-        pass
-
-
-def _node_missing() -> bool:
-    """True when the delegate tool will not be able to start.
-
-    The MCP server needs node, and Codex hands MCP servers a trimmed
-    environment. When node cannot be found the server never starts and the tool
-    is simply absent -- which the session can only report as "I cannot delegate".
-    Say so here, where the user can still act on it.
-    """
-    launcher = Path(
-        os.environ.get("PLUGIN_ROOT", Path(__file__).parents[1])
-    ) / "mcp" / "launch.sh"
-    if not launcher.exists():
-        return False
-    try:
-        result = subprocess.run(
-            ["/bin/sh", str(launcher), "--check-node"],
-            input="",
-            capture_output=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 127
-
-
 def main() -> int:
     try:
         hook_input = json.load(sys.stdin)
@@ -80,25 +38,13 @@ def main() -> int:
         os.environ.get("OVERFLOW_REMAINING_PERCENT", DEFAULT_REMAINING_PERCENT)
     )
 
-    event: dict[str, Any] = {
-        "hook_event": hook_input.get("hook_event_name"),
-        "source": hook_input.get("source"),
-        "session_id": hook_input.get("session_id"),
-        "triggerAtRemainingPercent": trigger_at,
-    }
-
     try:
         probe = _load_probe()
         usage = probe.summarize(probe.read_rate_limits())
-        event["usage"] = usage
-    except Exception as exc:
+    except Exception:
         # No allowance reading means no basis to change the session's behaviour.
         # Stay silent rather than guess.
-        event["error"] = str(exc)
-        _append_event(event)
         return 0
-
-    _append_event(event)
 
     remaining = float(usage["remainingPercent"])
     # Trigger at the configured boundary as well as below it. This makes an
@@ -131,29 +77,15 @@ def main() -> int:
         situation = f"Your main Codex allowance is {remaining:g}% remaining."
         headline = f"Overflow test: {remaining:g}% left."
 
-    if _node_missing():
-        print(
-            json.dumps(
-                {
-                    "systemMessage": (
-                        f"{headline} Overflow cannot start: node was not found. "
-                        "Install Node 22+, or set OVERFLOW_NODE to its path, or "
-                        "delegation will be unavailable this session."
-                    )
-                },
-                separators=(",", ":"),
-            )
-        )
-        return 0
-
-    # The plugin ships with the trusted-friends pool configuration. Give the
+    # Give the
     # nearly-empty session the complete behavior change without making it hunt
     # through files or spend allowance rediscovering the tool contract.
     context = (
         f"Overflow: {situation}\n\n"
         "For the rest of this session preserve the remaining allowance for intent, "
         "coordination, review, and integration. For substantive execution, use the "
-        "installed work skill. When Overflow is first used in this task, open "
+        "installed work skill. Overflow is already authenticated through its remote "
+        "MCP connection. When Overflow is first used in this task, open "
         "https://overflow.kushalsm.com in the user's Codex browser panel so they "
         "can watch the pool. Package one whole-task order and call "
         "`overflow_delegate` immediately as the next action; do not check the pool, "

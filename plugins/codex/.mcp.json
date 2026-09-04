@@ -1,29 +1,9 @@
 {
   "mcpServers": {
     "overflow": {
-      "command": "./mcp/launch.sh",
-      "args": [],
-      "cwd": ".",
-      "startup_timeout_sec": 30,
-      "tool_timeout_sec": 3600,
-      "env_vars": [
-        "PLUGIN_DATA",
-        "OVERFLOW_RELAY",
-        "OVERFLOW_TOKEN",
-        "OVERFLOW_NAME",
-        "OVERFLOW_NODE"
-      ],
-      "tools": {
-        "overflow_delegate": {
-          "approval_mode": "auto"
-        },
-        "overflow_claim": {
-          "approval_mode": "auto"
-        },
-        "overflow_return": {
-          "approval_mode": "auto"
-        }
-      }
+      "type": "http",
+      "url": "https://overflow.kushalsm.com/mcp",
+      "oauth_resource": "https://overflow.kushalsm.com/mcp"
     }
   }
 }

@@ -7,10 +7,14 @@
   "plugins": [
     {
       "name": "overflow",
-      "description": "After installing, review and trust Overflow's SessionStart hook. At or below 80% remaining Codex allowance, delegate through /work; friends use visible /earn tasks to claim, perform, and return the work.",
-      "version": "0.3.0",
+      "description": "Sign in on install, then delegate through /work; friends use visible /earn tasks to claim, perform, and return the work.",
+      "version": "0.4.0",
       "author": { "name": "Kushal", "url": "https://github.com/kiluazen" },
       "source": "./plugins/codex",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
       "category": "productivity",
       "homepage": "https://github.com/kiluazen/overflow"
     }

@@ -1,5 +1,13 @@
+import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { BOARD_HTML } from "./board.js";
 import { BG_JPEG_BASE64 } from "./bg.js";
+import { createOverflowMcpHandler } from "./mcp.js";
+import {
+  handleAuthorize,
+  handleGoogleCallback,
+  handleGoogleStart,
+  handleProtectedResource,
+} from "./oauth.js";
 
 // Overflow relay: one Durable Object holding the job board.
 //
@@ -19,24 +27,73 @@ const ARTIFACT_PREVIEW_CHARS = 1200;
 function unauthorized(reason) {
   return new Response(JSON.stringify({ error: reason }), {
     status: 401,
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "www-authenticate":
+        'Bearer resource_metadata="https://overflow.kushalsm.com/.well-known/oauth-protected-resource/mcp", scope="overflow:connect"',
+    },
   });
 }
 
-export default {
+async function sha256(value) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeEqual(left, right) {
+  if (!left || left.length !== right.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+async function poolIdentity(token, env, requestedName) {
+  const legacy = env.OVERFLOW_TOKEN || "";
+  if (legacy && constantTimeEqual(token, legacy)) {
+    return {
+      userId: "legacy-friends-pool",
+      displayName: requestedName || "friend",
+      deviceName: requestedName || "friend",
+      legacy: true,
+    };
+  }
+  if (!token.startsWith("ovf_")) return null;
+  const raw = await env.OAUTH_KV.get(`device:${await sha256(token)}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+const defaultHandler = {
   async fetch(request, env) {
     const url = new URL(request.url);
     const token = url.searchParams.get("token") || "";
-    const expected = env.OVERFLOW_TOKEN || "";
 
-    // One shared invite code separates friends from the internet. Constant work
-    // either way so the comparison does not leak length by timing.
-    // The board and the feed it reads are deliberately open: this pool is a
-    // few friends and the point is being able to watch it work. Everything that
-    // moves an order still needs the token.
+    const protectedResource = handleProtectedResource(request);
+    if (protectedResource) return protectedResource;
+    if (url.pathname === "/.well-known/openid-configuration") {
+      return Response.redirect(`${url.origin}/.well-known/oauth-authorization-server`, 302);
+    }
+    if (url.pathname === "/authorize" || url.pathname.startsWith("/authorize/")) {
+      return handleAuthorize(request, env);
+    }
+    if (url.pathname === "/auth/google/start") return handleGoogleStart(request, env);
+    if (url.pathname === "/auth/google/callback") return handleGoogleCallback(request, env);
+
+    // The board and its activity feed are public so friends can watch the
+    // experiment. Every route that moves an order requires either the old
+    // dogfood invite code or an OAuth bearer handled by the MCP provider.
     const publicPaths = new Set(["/", "/board", "/bg.jpg", "/api/activity"]);
-    if (!expected || token.length !== expected.length || token !== expected) {
-      if (!publicPaths.has(url.pathname)) return unauthorized("bad or missing token");
+    let identity = null;
+    if (!publicPaths.has(url.pathname)) {
+      identity = await poolIdentity(token, env, url.searchParams.get("name") || "");
+      if (!identity) return unauthorized("bad or missing Overflow token");
     }
 
     const id = env.POOL.idFromName(POOL);
@@ -64,6 +121,14 @@ export default {
       case "/earn":
       case "/delegate":
       case "/status":
+        if (identity) {
+          url.searchParams.set("name", identity.deviceName || identity.displayName || "friend");
+          const headers = new Headers(request.headers);
+          headers.set("x-overflow-user-id", identity.userId || "");
+          headers.set("x-overflow-display-name", identity.displayName || "");
+          headers.set("x-overflow-device-name", identity.deviceName || "");
+          return pool.fetch(new Request(url.toString(), { method: request.method, headers, body: request.body }));
+        }
         return pool.fetch(request);
       default:
         return new Response("not found", { status: 404 });
@@ -108,8 +173,157 @@ export class Pool {
     return `job:${id}`;
   }
 
+  remoteJobKey(id) {
+    return `remote-job:${id}`;
+  }
+
+  remoteBatchKey(id) {
+    return `remote-batch:${id}`;
+  }
+
+  actor(request) {
+    return {
+      userId: request.headers.get("x-overflow-user-id") || "",
+      displayName: request.headers.get("x-overflow-display-name") || "someone",
+      email: request.headers.get("x-overflow-email") || "",
+    };
+  }
+
+  async remoteJobs() {
+    const entries = await this.state.storage.list({ prefix: "remote-job:" });
+    return [...entries.values()];
+  }
+
+  async handleRemote(request, url) {
+    const actor = this.actor(request);
+    if (!actor.userId) return Response.json({ error: "missing authenticated actor" }, { status: 401 });
+
+    if (url.pathname === "/rpc/status") {
+      const jobs = await this.remoteJobs();
+      return Response.json({
+        queued: jobs.filter((job) => job.status === "queued").length,
+        claimed: jobs.filter((job) => job.status === "claimed").length,
+        completed: jobs.filter((job) => job.status === "completed").length,
+      });
+    }
+
+    if (url.pathname === "/rpc/submit") {
+      const body = await request.json();
+      const orders = Array.isArray(body.orders) ? body.orders : [];
+      if (!orders.length) return Response.json({ error: "no orders" }, { status: 400 });
+      const batch = crypto.randomUUID();
+      const ids = [];
+      for (const [index, order] of orders.entries()) {
+        const id = crypto.randomUUID();
+        const job = {
+          id,
+          batch,
+          index,
+          transport: "remote",
+          requesterUserId: actor.userId,
+          requesterName: actor.displayName,
+          requesterEmail: actor.email,
+          order,
+          status: "queued",
+          createdAt: Date.now(),
+        };
+        ids.push(id);
+        this.queue.push(job);
+        await this.state.storage.put(this.remoteJobKey(id), job);
+        await this.recordEvent({
+          type: "queued",
+          jobId: id,
+          objective: String(order?.objective || ""),
+          requester: actor.displayName,
+        });
+      }
+      await this.state.storage.put(this.remoteBatchKey(batch), ids);
+      await this.saveQueue();
+      return Response.json({ batch, jobs: ids });
+    }
+
+    if (url.pathname === "/rpc/claim") {
+      const index = this.queue.findIndex((job) => job.transport === "remote" && job.status === "queued");
+      if (index < 0) return new Response(null, { status: 204 });
+      const [job] = this.queue.splice(index, 1);
+      const claimed = {
+        ...job,
+        status: "claimed",
+        workerUserId: actor.userId,
+        workerName: actor.displayName,
+        workerEmail: actor.email,
+        claimedAt: Date.now(),
+      };
+      await this.saveQueue();
+      await this.state.storage.put(this.remoteJobKey(job.id), claimed);
+      await this.recordEvent({
+        type: "claimed",
+        jobId: job.id,
+        objective: String(job.order?.objective || ""),
+        requester: job.requesterName,
+        worker: actor.displayName,
+      });
+      return Response.json(claimed);
+    }
+
+    if (url.pathname === "/rpc/return") {
+      const body = await request.json();
+      const job = await this.state.storage.get(this.remoteJobKey(body.jobId || ""));
+      if (!job) return Response.json({ error: "unknown job" }, { status: 404 });
+      if (job.workerUserId !== actor.userId) {
+        return Response.json({ error: "this account did not claim that job" }, { status: 403 });
+      }
+      if (job.status === "completed" || job.status === "failed") {
+        return Response.json({ returned: true, delivered: true, jobId: job.id, status: job.status });
+      }
+      if (job.status !== "claimed") return Response.json({ error: "job is not claimed" }, { status: 409 });
+      const status = body.status === "failed" ? "failed" : "completed";
+      const completed = {
+        ...job,
+        status,
+        completedAt: Date.now(),
+        result: {
+          artifact: String(body.artifact || ""),
+          files: Array.isArray(body.files) ? body.files : [],
+        },
+      };
+      await this.state.storage.put(this.remoteJobKey(job.id), completed);
+      await this.recordEvent({
+        type: status === "failed" ? "failed" : "returned",
+        jobId: job.id,
+        objective: String(job.order?.objective || ""),
+        requester: job.requesterName,
+        worker: actor.displayName,
+        delivered: true,
+        artifactChars: completed.result.artifact.length,
+        artifact: completed.result.artifact.slice(0, ARTIFACT_PREVIEW_CHARS),
+        files: completed.result.files.map((file) => file.name || "file"),
+      });
+      return Response.json({ returned: true, delivered: true, jobId: job.id, status });
+    }
+
+    if (url.pathname === "/rpc/results") {
+      const batch = url.searchParams.get("batch") || "";
+      const ids = await this.state.storage.get(this.remoteBatchKey(batch));
+      if (!Array.isArray(ids)) return Response.json({ error: "unknown batch" }, { status: 404 });
+      const jobs = (await Promise.all(ids.map((id) => this.state.storage.get(this.remoteJobKey(id))))).filter(Boolean);
+      if (jobs.some((job) => job.requesterUserId !== actor.userId)) {
+        return Response.json({ error: "this account did not create that batch" }, { status: 403 });
+      }
+      return Response.json({
+        batch,
+        complete: jobs.length === ids.length && jobs.every((job) => job.status === "completed" || job.status === "failed"),
+        jobs,
+      });
+    }
+
+    return Response.json({ error: "unknown rpc route" }, { status: 404 });
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
+
+    if (url.pathname.startsWith("/rpc/")) return this.handleRemote(request, url);
 
     // Wipe the ledger. Token-gated, because it is the one thing here that
     // destroys something.
@@ -120,6 +334,7 @@ export class Pool {
 
     if (url.pathname === "/api/activity") {
       const events = (await this.state.storage.get("events")) || [];
+      const remoteJobs = await this.remoteJobs();
       const sockets = this.socketsTagged("earner").map((ws) => {
         const meta = this.meta(ws);
         return { name: meta.name || "anon", busy: Boolean(meta.busy) };
@@ -142,14 +357,21 @@ export class Pool {
           });
         }
       }
+      for (const job of remoteJobs.filter((candidate) => candidate.status === "claimed")) {
+        inFlight.push({
+          jobId: job.id,
+          requester: job.requesterName || "someone",
+          worker: job.workerName || "someone",
+        });
+      }
       return Response.json(
         {
           now: Date.now(),
           machines: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
           online: sockets.length,
           idle: sockets.filter((s) => !s.busy).length,
-          queued: this.queue.length,
-          waiting: this.queue.map((job) => ({
+          queued: this.queue.filter((job) => job.status !== "claimed").length,
+          waiting: this.queue.filter((job) => job.status !== "claimed").map((job) => ({
             jobId: job.id,
             objective: String(job.order?.objective ?? ""),
             requester: job.requesterName || "someone",
@@ -195,13 +417,15 @@ export class Pool {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     const role = url.pathname === "/earn" ? "earner" : "requester";
-    const name = url.searchParams.get("name") || "anon";
+    const name = request.headers.get("x-overflow-device-name") || url.searchParams.get("name") || "anon";
+    const userId = request.headers.get("x-overflow-user-id") || "legacy-friends-pool";
+    const displayName = request.headers.get("x-overflow-display-name") || name;
     const connectionId = crypto.randomUUID();
 
     // Tags are the only state that survives hibernation, so identity and role
     // both have to live in them.
     this.state.acceptWebSocket(server, [role, `id:${connectionId}`]);
-    server.serializeAttachment({ role, name, connectionId, busy: false, jobs: {} });
+    server.serializeAttachment({ role, name, userId, displayName, connectionId, busy: false, jobs: {} });
 
     if (role === "earner") this.drainQueue();
     else this.send(server, { type: "hello", idle: this.idleEarners().length });
@@ -300,9 +524,12 @@ export class Pool {
   // on the same evening is the normal case, not the edge case.
   takeNextJob() {
     const counts = this.inFlightByRequester();
-    let bestIndex = 0;
+    let bestIndex = -1;
     let bestCount = Infinity;
     for (let i = 0; i < this.queue.length; i += 1) {
+      // OAuth-backed jobs are explicitly claimed through /rpc/claim. A legacy
+      // websocket earner must never consume one and strand its result.
+      if (this.queue[i].transport === "remote") continue;
       const count = counts.get(this.queue[i].requester) || 0;
       if (count < bestCount) {
         bestCount = count;
@@ -310,15 +537,17 @@ export class Pool {
         if (count === 0) break;
       }
     }
+    if (bestIndex < 0) return null;
     return this.queue.splice(bestIndex, 1)[0];
   }
 
   async drainQueue() {
     const before = this.queue.length;
-    while (this.queue.length > 0) {
+    while (true) {
       const earner = this.idleEarners()[0];
       if (!earner) break;
       const job = this.takeNextJob();
+      if (!job) break;
       const requester = this.findByConnectionId(job.requester);
       // The requester hung up while this job sat in the queue. Drop it rather
       // than spend someone's allowance on an artifact with nowhere to go.
@@ -471,3 +700,34 @@ export class Pool {
     return this.webSocketClose(ws);
   }
 }
+
+const mcpApi = {
+  async fetch(request, env, ctx) {
+    const route = new URL(request.url).pathname;
+    if (route !== "/mcp" && route !== "/mcp/") return new Response("Not found", { status: 404 });
+    return createOverflowMcpHandler(env, route, (task) => ctx.waitUntil(task))(request, env, ctx);
+  },
+};
+
+const BASE = "https://overflow.kushalsm.com";
+
+export default new OAuthProvider({
+  apiHandlers: {
+    "/mcp": mcpApi,
+    "/mcp/": mcpApi,
+  },
+  defaultHandler,
+  authorizeEndpoint: "/authorize",
+  tokenEndpoint: "/token",
+  clientRegistrationEndpoint: "/register",
+  scopesSupported: ["openid", "profile", "email", "overflow:connect"],
+  allowPlainPKCE: false,
+  resourceMetadata: {
+    resource: `${BASE}/mcp`,
+    authorization_servers: [BASE],
+    scopes_supported: ["openid", "profile", "email", "overflow:connect"],
+    bearer_methods_supported: ["header"],
+    resource_name: "Overflow",
+  },
+  resourceMatchOriginOnly: true,
+});

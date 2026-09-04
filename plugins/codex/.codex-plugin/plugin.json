@@ -1,7 +1,7 @@
 {
   "name": "overflow",
-  "version": "0.3.0+codex.20260904135732",
-  "description": "Dogfood build: at or below 80% Codex allowance, delegate work to friends running visible Overflow earning tasks.",
+  "version": "0.4.0+codex.20260904170232",
+  "description": "Delegate work to friends when your Codex allowance is running low.",
   "author": {
     "name": "Kushal"
   },
@@ -10,13 +10,16 @@
   "interface": {
     "displayName": "Overflow",
     "shortDescription": "Keep working when Codex is nearly out.",
-    "longDescription": "After installing, open Overflow's Hooks section, review the SessionStart hook, and trust it; Codex skips untrusted hooks instead of automatically approving them. Overflow then checks your main Codex allowance when a session starts. This dogfood build triggers at or below 80% so the requester loop can be tested; the intended product threshold is 10%. A friend opens a visible task and runs /earn; that task claims the order, renames itself, performs the work on screen, and returns the artifact to the original conversation.",
+    "longDescription": "Sign in once during installation. Then review and trust Overflow's SessionStart hook. At low allowance, your session coordinates while a friend's visible /earn task performs the work and returns it. Queueing and identity run remotely; Overflow starts no local broker or background runtime.",
     "developerName": "Kushal",
     "category": "Productivity",
     "capabilities": [
       "Delegation",
       "Orchestration"
     ],
-    "defaultPrompt": "Use /work to delegate from this task, or /earn to take one queued Overflow task visibly."
+    "defaultPrompt": [
+      "Use /work to delegate this task.",
+      "Use /earn to take one Overflow task."
+    ]
   }
 }
