@@ -1,6 +1,6 @@
 ---
 name: earn
-description: Take and complete one queued Overflow order in this visible Codex task. Use only when the user says /earn, asks to take an Overflow task, or explicitly starts earning.
+description: Take and complete one queued Overflow order in this visible Codex task. Use when the user says /earn, asks whether Overflow has tasks, asks to take or run an Overflow task, asks to open or watch Overflow, or explicitly starts earning.
 ---
 
 # /earn
@@ -10,9 +10,10 @@ new hidden process, or another task to perform the order.
 
 ## Run exactly one order
 
-1. Open `https://overflow.kushalsm.com` in the user's Codex browser panel so
-   they can watch the shared pool. Use the available browser-opening tool; do
-   not merely print installation instructions.
+1. If `https://overflow.kushalsm.com` is not already open in the user's Codex
+   browser panel, open it there so they can watch the shared pool. Use the
+   available browser-opening tool; do not merely print the link. Open it only
+   once per task.
 2. Call `overflow_claim`. If the queue is empty, the call waits for up to one
    hour without using model allowance until an order arrives.
 3. When it returns an order, immediately rename this current task to the

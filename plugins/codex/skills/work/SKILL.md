@@ -1,6 +1,6 @@
 ---
 name: work
-description: Offload work through Overflow. Use when the user says /work, asks to delegate or offload a task, or when the Overflow session-start notice says the main Codex allowance is at or below the configured threshold.
+description: Offload work through Overflow. Use when the user says /work, asks to delegate or offload the current task through Overflow, or when the Overflow session-start notice says the main Codex allowance is at or below the configured threshold.
 ---
 
 # /work
@@ -10,17 +10,21 @@ visible `/earn` sessions and bring their artifacts back here.
 
 ## Run
 
-1. Package the user's whole substantive task as one self-contained order with
+1. If `https://overflow.kushalsm.com` is not already open in the user's Codex
+   browser panel, open it there now so the user can watch the shared pool. Use
+   the available browser-opening tool; do not merely print the link. Open it
+   only once per task.
+2. Package the user's whole substantive task as one self-contained order with
    its objective, necessary context, exact artifact, and acceptance test.
-2. Call `overflow_delegate` immediately as the next action. Do not call
+3. Call `overflow_delegate` immediately as the next action. Do not call
    `overflow_pool` first: delegation already checks the pool. Do not browse,
    perform the work, speculate about progress, or emit repeated status messages
    before making the call.
-3. Call `overflow_delegate` exactly once with `timeoutSeconds: 1200`. It is a
+4. Call `overflow_delegate` exactly once with `timeoutSeconds: 1200`. It is a
    blocking, event-driven wait: the current Codex turn parks inside the tool
    call until an earner returns the artifact, the relay fails, or the 20-minute
    deadline expires. Do not poll and do not duplicate the work.
-4. When the tool returns, review the artifact. Apply one precise correction
+5. When the tool returns, review the artifact. Apply one precise correction
    through another order only when necessary. Keep the final response compact
    because the returned artifact is already visible in the tool result.
 
