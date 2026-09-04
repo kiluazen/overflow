@@ -153,11 +153,12 @@ def main() -> int:
         f"Overflow: {situation}\n\n"
         "For the rest of this session preserve the remaining allowance for intent, "
         "coordination, review, and integration. For substantive execution, use the "
-        "installed work skill. Check `overflow_pool`, then call `overflow_delegate` "
-        "once. Default to one whole-task order; split only when the pool already has "
-        "enough idle `/earn` sessions for every order. The call may wait until a friend "
-        "opens a visible `/earn` task. Do not "
-        "perform delegated work while waiting, and never say an order was delegated "
+        "installed work skill. Package one whole-task order and call "
+        "`overflow_delegate` immediately as the next action; do not check the pool, "
+        "research, or narrate progress first. Call it exactly once with a 20-minute "
+        "timeout. The tool call parks this turn until a friend returns the artifact, "
+        "the relay fails, or the timeout expires. Do not perform or duplicate the "
+        "delegated work while it is pending, and never say an order was delegated "
         "unless the tool was actually called."
     )
 

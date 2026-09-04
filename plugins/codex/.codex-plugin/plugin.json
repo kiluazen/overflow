@@ -1,6 +1,6 @@
 {
   "name": "overflow",
-  "version": "0.3.0+codex.20260904132242",
+  "version": "0.3.0+codex.20260904190112",
   "description": "Dogfood build: at or below 80% Codex allowance, delegate work to friends running visible Overflow earning tasks.",
   "author": {
     "name": "Kushal"
