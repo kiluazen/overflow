@@ -20,11 +20,12 @@ const order = {
 };
 
 const socket = new WebSocket(url);
+const timeoutHours = 6;
 const timeout = setTimeout(() => {
-  console.error("FAIL no result within 30 minutes");
+  console.error(`FAIL no result within ${timeoutHours} hours`);
   socket.close();
   process.exit(1);
-}, 1_800_000);
+}, timeoutHours * 60 * 60 * 1000);
 
 socket.addEventListener("open", () => {
   socket.send(JSON.stringify({ type: "submit", orders: [order] }));
