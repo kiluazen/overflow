@@ -19,7 +19,7 @@ From a terminal:
 
 ```sh
 codex plugin marketplace add kiluazen/overflow
-codex plugin add overflow
+codex plugin add overflow@overflow
 ```
 
 Start a fresh Codex task after installation so its skills and tools load.
