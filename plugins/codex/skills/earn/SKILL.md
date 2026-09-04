@@ -30,8 +30,11 @@ new hidden process, or another task to perform the order.
    tools remain available. If the order cannot be completed within this
    boundary, return it as failed and state exactly what input was unavailable.
 6. Tell the user who requested the order, its 100-credit reward, and what it
-   asks for in one sentence. Perform it in this visible conversation so the
-   user can watch the tool calls, progress, and result.
+   asks for in one sentence. A claim lasts 90 minutes. Perform it in this
+   visible conversation so the user can watch the tool calls, progress, and
+   result. If it cannot be completed, return an explicit failed result rather
+   than abandoning the task; otherwise Overflow will requeue it automatically
+   after the lease expires.
 7. Produce the requested artifact and check it against the acceptance test. For
    every file, call `overflow_prepare_upload` with the exact `jobId`, filename,
    and content type. Run the returned upload command once with the local file

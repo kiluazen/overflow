@@ -86,7 +86,7 @@ export const BOARD_HTML = String.raw`<!doctype html>
       <tbody id="jobs"></tbody></table></div></section>
     <div class="stack">
       <section class="section"><div class="section-head"><h2>Members</h2><span class="hint">OAuth accounts</span></div>
-        <div class="scroll"><table class="accounts"><thead><tr><th>Member</th><th>Available</th><th>Held</th><th>Earned</th><th>Spent</th><th>Work</th></tr></thead>
+        <div class="scroll"><table class="accounts"><thead><tr><th>Member</th><th>Available</th><th>Held</th><th>Earned</th><th>Spent</th><th>Refunded</th><th>Work</th></tr></thead>
         <tbody id="accounts"></tbody></table></div></section>
       <section class="section"><div class="section-head"><h2>Activity</h2><span class="hint" id="workerState"></span></div><ol class="events" id="events"></ol></section>
       <section class="section"><div class="rule" id="rule"></div></section>
@@ -97,9 +97,10 @@ export const BOARD_HTML = String.raw`<!doctype html>
 var esc=function(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;")};
 var n=function(v){return Number(v||0).toLocaleString("en-US")};
 var ago=function(ms,now){if(!ms)return "—";var s=Math.max(0,Math.floor((now-ms)/1000));if(s<60)return s+"s ago";if(s<3600)return Math.floor(s/60)+"m ago";if(s<86400)return Math.floor(s/3600)+"h ago";return Math.floor(s/86400)+"d ago"};
+var until=function(ms,now){if(!ms)return "";var s=Math.max(0,Math.floor((ms-now)/1000));if(s<60)return s+"s lease";if(s<3600)return Math.floor(s/60)+"m lease";return Math.floor(s/3600)+"h "+Math.floor((s%3600)/60)+"m lease"};
 var duration=function(a,b,now){if(!a)return "—";var end=b||now;var s=Math.max(0,Math.floor((end-a)/1000));if(s<60)return s+"s";if(s<3600)return Math.floor(s/60)+"m";return Math.floor(s/3600)+"h "+Math.floor((s%3600)/60)+"m"};
 var set=function(id,value){document.getElementById(id).textContent=value};
-var resultCell=function(j){if(!j.artifact&&!j.files.length)return '<span class="muted">—</span>';var files=j.files.length?'<div class="files">'+j.files.map(esc).join(" · ")+'</div>':"";return '<details><summary>'+n(j.artifactChars)+' chars · '+n(j.files.length)+' files</summary><pre>'+esc(j.artifact||"No text result")+'</pre>'+files+'</details>'};
+var resultCell=function(j){if(!j.artifactChars&&!j.files.length)return '<span class="muted">—</span>';var files=j.files.length?'<div class="files">'+j.files.map(esc).join(" · ")+'</div>':"";return '<span class="mono">'+n(j.artifactChars)+' chars · '+n(j.files.length)+' files</span>'+files};
 var creditCell=function(j){if(!j.credits)return '<span class="muted">legacy</span>';if(j.status==="completed")return '<span class="money">+'+n(j.credits)+' worker</span>';if(j.status==="failed")return '<span class="money">'+n(j.credits)+' refunded</span>';return '<span class="money">−'+n(j.credits)+' held</span>'};
 var render=function(d){
   var c=d.credits||{},t=d.totals||{},now=d.now||Date.now();
@@ -112,14 +113,15 @@ var render=function(d){
   document.getElementById("rule").innerHTML='<b>'+n(c.perOrder)+' credits</b> move only when work completes. Queued and running work is reserved; failed work is refunded.';
   var jobs=d.jobs||[];
   document.getElementById("jobs").innerHTML=jobs.length?jobs.map(function(j){
-    var timing=ago(j.createdAt,now)+'<div class="muted mono">'+duration(j.claimedAt||j.createdAt,j.completedAt,now)+'</div>';
+    var lease=j.status==="claimed"?'<div class="muted mono">'+until(j.leaseExpiresAt,now)+' · try '+n(j.attempts)+'/2</div>':(j.attempts?'<div class="muted mono">'+n(j.attempts)+' claim'+(j.attempts===1?'':'s')+'</div>':'');
+    var timing=ago(j.createdAt,now)+'<div class="muted mono">'+duration(j.claimedAt||j.createdAt,j.completedAt,now)+'</div>'+lease;
     var route=esc(j.requester)+'<div class="muted">→ '+esc(j.worker||"unclaimed")+'</div>';
     return '<tr><td><span class="state '+esc(j.status)+'">'+esc(j.status)+'</span><div class="muted mono">'+esc(j.id.slice(0,8))+'</div></td>'+
       '<td class="objective"><b title="'+esc(j.objective||"Untitled order")+'">'+esc(j.objective||"Untitled order")+'</b><small>'+esc(j.expectedArtifact||"No artifact specified")+'</small></td>'+
       '<td class="route">'+route+'</td><td>'+creditCell(j)+'</td><td class="mono">'+timing+'</td><td>'+resultCell(j)+'</td></tr>';
   }).join(""):'<tr><td colspan="6" class="empty">No OAuth work has been submitted yet.</td></tr>';
   var accounts=d.accounts||[];
-  document.getElementById("accounts").innerHTML=accounts.length?accounts.map(function(a){return '<tr><td>'+esc(a.name)+'<div class="muted mono">'+ago(a.lastSeenAt,now)+'</div></td><td class="money">'+n(a.balance)+'</td><td class="money">'+n(a.reserved)+'</td><td class="positive mono">+'+n(a.earned)+'</td><td class="mono">'+n(a.spent)+'</td><td class="mono">'+n(a.completed)+' done · '+n(a.delegated)+' sent</td></tr>'}).join(""):'<tr><td colspan="6" class="empty">Members appear after Google sign-in.</td></tr>';
+  document.getElementById("accounts").innerHTML=accounts.length?accounts.map(function(a){return '<tr><td>'+esc(a.name)+'<div class="muted mono">'+ago(a.lastSeenAt,now)+'</div></td><td class="money">'+n(a.balance)+'</td><td class="money">'+n(a.reserved)+'</td><td class="positive mono">+'+n(a.earned)+'</td><td class="mono">'+n(a.spent)+'</td><td class="mono">'+n(a.refunded)+'</td><td class="mono">'+n(a.completed)+' done · '+n(a.delegated)+' sent</td></tr>'}).join(""):'<tr><td colspan="7" class="empty">Members appear after Google sign-in.</td></tr>';
   var events=(d.events||[]).slice(0,40);
   document.getElementById("events").innerHTML=events.length?events.map(function(e){var credits=e.credits?' · '+n(e.credits)+' '+esc(e.creditState||"credits"):"";var text;if(e.type==="joined")text=esc(e.member||"member")+' joined';else{text=esc(e.objective||"order")+(e.worker?' · '+esc(e.requester||"someone")+' → '+esc(e.worker):' · '+esc(e.requester||"someone"))}return '<li><time>'+ago(e.at,now)+'</time><code>'+esc(e.type)+'</code><span>'+text+credits+'</span></li>'}).join(""):'<li class="empty">No activity yet.</li>';
   document.getElementById("error").style.display="none";
