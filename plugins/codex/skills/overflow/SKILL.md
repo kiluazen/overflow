@@ -20,17 +20,21 @@ one bounded piece of execution and nothing else.
 
 ## Is this worth delegating?
 
-Writing orders is not free. It costs you about as much output as writing a
-thousand words of answer would. Measured on the same two jobs:
+Writing orders is not free — it costs about what writing a thousand words of
+answer costs. So estimate the finished answer first, in words.
 
-| finished answer | doing it here | delegating it |
+**Under 1,000 words: do not delegate.** Write it here. Measured, a 550-word job
+cost 988 output tokens written directly and 2,400 delegated.
+
+**At or over 1,000 words: delegate.** The same measurement on a 1,900-word job:
+
+| | output tokens | content delivered |
 |---|---|---|
-| ~550 words | 988 output tokens | 2,400 |
-| ~1,900 words | 4,223 output tokens | 2,692 |
+| written here | 4,223 | 1,930 words |
+| delegated | 2,356 | 2,599 words |
 
-So a short answer is cheaper to just write. Delegate substantial work — several
-sections, a long document, a batch of independent pieces. For anything you could
-finish in a few paragraphs, writing the order is the expensive part.
+Less than half the output, for more finished text, because the writing happened
+on someone else's allowance.
 
 ## What to do
 

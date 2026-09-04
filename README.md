@@ -106,6 +106,28 @@ Codex misbehaves quietly without each of these, so they ship in
 - `env_vars` — Codex does not pass the parent shell's environment to MCP
   servers. Anything inherited from a login shell arrives undefined.
 
+## Does it actually save you anything?
+
+Measured, requester on the small model and workers on the good one:
+
+| job | | output tokens | content delivered |
+|---|---|---|---|
+| ~550 words | written directly | **988** | 558 words |
+| | delegated | 2,400 | 546 words |
+| ~1,900 words | written directly | 4,223 | 1,930 words |
+| | delegated | **2,356** | **2,599 words** |
+
+Delegating a short job is a straight loss — writing the orders costs about what
+writing a thousand words of answer costs. Delegating a substantial one costs
+under half the output and returns more finished text, because the writing
+happened on someone else's allowance. Overflow estimates the answer length and
+declines to delegate below roughly a thousand words.
+
+Two things had to be true for that second row. The orchestrator must not retype
+what the workers wrote — the tool result is already on screen, and copying it
+into its own reply pays for every word twice. And the job has to be big enough
+to earn back the orders.
+
 ## What's been verified
 
 Against the deployed relay, from a plugin installed the way you'd install it:
