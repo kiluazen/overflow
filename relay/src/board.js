@@ -43,7 +43,8 @@ export const BOARD_HTML = String.raw`<!doctype html>
   td{padding:10px 11px;border-bottom:1px solid var(--hair);vertical-align:top}
   tr:last-child td{border-bottom:0}.mono{font-family:var(--mono);font-size:11px}
   .muted{color:var(--muted)}.money{color:var(--yellow);font-family:var(--mono);white-space:nowrap}
-  .objective{max-width:580px}.objective b{display:block;font-weight:500;margin-bottom:3px}
+  .objective{max-width:580px}.objective b{display:-webkit-box;font-weight:500;margin-bottom:3px;
+    -webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
   .objective small{display:block;color:var(--muted);font-size:11px;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis;max-width:520px}.route{white-space:nowrap;font-size:12px}
   .state{display:inline-flex;align-items:center;gap:7px;font:500 10px var(--mono);
@@ -58,7 +59,7 @@ export const BOARD_HTML = String.raw`<!doctype html>
   .events{list-style:none;padding:0;margin:0;max-height:360px;overflow:auto}
   .events li{display:grid;grid-template-columns:54px 66px 1fr;gap:8px;padding:9px 12px;
     border-bottom:1px solid var(--hair);font-size:11px}.events li:last-child{border:0}
-  .events time,.events code{font:10px var(--mono);color:var(--muted)}
+  .events time,.events code{font:10px var(--mono);color:var(--muted)}.events li span{min-width:0;overflow-wrap:anywhere}
   .empty{padding:26px 14px;color:var(--muted);font:11px var(--mono);text-align:center}
   .rule{padding:13px;color:var(--muted);font-size:12px}.rule b{color:var(--ink);font-family:var(--mono)}
   @media(max-width:980px){.metrics{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:1fr}}
@@ -114,7 +115,7 @@ var render=function(d){
     var timing=ago(j.createdAt,now)+'<div class="muted mono">'+duration(j.claimedAt||j.createdAt,j.completedAt,now)+'</div>';
     var route=esc(j.requester)+'<div class="muted">→ '+esc(j.worker||"unclaimed")+'</div>';
     return '<tr><td><span class="state '+esc(j.status)+'">'+esc(j.status)+'</span><div class="muted mono">'+esc(j.id.slice(0,8))+'</div></td>'+
-      '<td class="objective"><b>'+esc(j.objective||"Untitled order")+'</b><small>'+esc(j.expectedArtifact||"No artifact specified")+'</small></td>'+
+      '<td class="objective"><b title="'+esc(j.objective||"Untitled order")+'">'+esc(j.objective||"Untitled order")+'</b><small>'+esc(j.expectedArtifact||"No artifact specified")+'</small></td>'+
       '<td class="route">'+route+'</td><td>'+creditCell(j)+'</td><td class="mono">'+timing+'</td><td>'+resultCell(j)+'</td></tr>';
   }).join(""):'<tr><td colspan="6" class="empty">No OAuth work has been submitted yet.</td></tr>';
   var accounts=d.accounts||[];
