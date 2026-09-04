@@ -22,6 +22,8 @@ const DOWNLOAD_TTL_MS = 60 * 60 * 1000;
 const MAX_ARTIFACT_BYTES = 50 * 1024 * 1024;
 const INBOX_ARTIFACT_CHARS = 20_000;
 const MAX_USER_BATCHES = 50;
+const STARTING_CREDITS = 1_000;
+const ORDER_CREDITS = 100;
 
 function safeFileName(value) {
   const name = String(value || "artifact").replace(/[\r\n"\\/]/g, "_").trim();
@@ -193,6 +195,10 @@ export class Pool {
     return `remote-user-batches:${userId}`;
   }
 
+  accountKey(userId) {
+    return `account:${userId}`;
+  }
+
   uploadKey(token) {
     return `upload:${token}`;
   }
@@ -214,6 +220,81 @@ export class Pool {
       userId: request.headers.get("x-overflow-user-id") || "",
       displayName: request.headers.get("x-overflow-display-name") || "someone",
       email: request.headers.get("x-overflow-email") || "",
+    };
+  }
+
+  async ensureAccount(actor) {
+    if (!actor?.userId) return null;
+    const key = this.accountKey(actor.userId);
+    const existing = await this.state.storage.get(key);
+    const now = Date.now();
+    const account = existing || {
+      userId: actor.userId,
+      displayName: actor.displayName || "someone",
+      email: actor.email || "",
+      balance: STARTING_CREDITS,
+      reserved: 0,
+      earned: 0,
+      spent: 0,
+      delegated: 0,
+      completed: 0,
+      refunded: 0,
+      createdAt: now,
+    };
+    account.displayName = actor.displayName || account.displayName || "someone";
+    account.email = actor.email || account.email || "";
+    account.lastSeenAt = now;
+    await this.state.storage.put(key, account);
+    if (!existing) {
+      await this.recordEvent({
+        type: "joined",
+        member: account.displayName,
+        credits: STARTING_CREDITS,
+        creditState: "issued",
+      });
+    }
+    return account;
+  }
+
+  async saveAccount(account) {
+    await this.state.storage.put(this.accountKey(account.userId), account);
+  }
+
+  async accounts() {
+    const entries = await this.state.storage.list({ prefix: "account:" });
+    return [...entries.values()];
+  }
+
+  publicAccount(account) {
+    return {
+      name: account.displayName || "someone",
+      balance: Number(account.balance || 0),
+      reserved: Number(account.reserved || 0),
+      earned: Number(account.earned || 0),
+      spent: Number(account.spent || 0),
+      delegated: Number(account.delegated || 0),
+      completed: Number(account.completed || 0),
+      createdAt: Number(account.createdAt || 0),
+      lastSeenAt: Number(account.lastSeenAt || 0),
+    };
+  }
+
+  publicJob(job) {
+    return {
+      id: job.id,
+      batch: job.batch,
+      status: job.status,
+      objective: String(job.order?.objective || ""),
+      expectedArtifact: String(job.order?.expectedArtifact || ""),
+      requester: job.requesterName || "someone",
+      worker: job.workerName || "",
+      credits: Number(job.creditCost || 0),
+      createdAt: Number(job.createdAt || 0),
+      claimedAt: Number(job.claimedAt || 0),
+      completedAt: Number(job.completedAt || 0),
+      artifact: String(job.result?.artifact || "").slice(0, ARTIFACT_PREVIEW_CHARS),
+      artifactChars: String(job.result?.artifact || "").length,
+      files: (job.result?.files || []).map((file) => safeFileName(file?.name)),
     };
   }
 
@@ -308,6 +389,14 @@ export class Pool {
   async handleRemote(request, url) {
     const actor = this.actor(request);
     if (!actor.userId) return Response.json({ error: "missing authenticated actor" }, { status: 401 });
+    const actorAccount = await this.ensureAccount(actor);
+
+    if (url.pathname === "/rpc/account-init" || url.pathname === "/rpc/account") {
+      return Response.json({
+        account: this.publicAccount(actorAccount),
+        credits: { starting: STARTING_CREDITS, perOrder: ORDER_CREDITS },
+      });
+    }
 
     if (url.pathname === "/rpc/status") {
       const jobs = await this.remoteJobs();
@@ -315,6 +404,9 @@ export class Pool {
         queued: jobs.filter((job) => job.status === "queued").length,
         claimed: jobs.filter((job) => job.status === "claimed").length,
         completed: jobs.filter((job) => job.status === "completed").length,
+        failed: jobs.filter((job) => job.status === "failed").length,
+        account: this.publicAccount(actorAccount),
+        credits: { starting: STARTING_CREDITS, perOrder: ORDER_CREDITS },
       });
     }
 
@@ -322,6 +414,17 @@ export class Pool {
       const body = await request.json();
       const orders = Array.isArray(body.orders) ? body.orders : [];
       if (!orders.length) return Response.json({ error: "no orders" }, { status: 400 });
+      if (orders.length > 8) return Response.json({ error: "at most 8 orders may be delegated at once" }, { status: 400 });
+      const reserve = orders.length * ORDER_CREDITS;
+      if (Number(actorAccount.balance || 0) < reserve) {
+        return Response.json({
+          error: `not enough credits: ${reserve} required, ${Number(actorAccount.balance || 0)} available`,
+        }, { status: 402 });
+      }
+      actorAccount.balance -= reserve;
+      actorAccount.reserved = Number(actorAccount.reserved || 0) + reserve;
+      actorAccount.delegated = Number(actorAccount.delegated || 0) + orders.length;
+      await this.saveAccount(actorAccount);
       const batch = crypto.randomUUID();
       const ids = [];
       for (const [index, order] of orders.entries()) {
@@ -335,6 +438,7 @@ export class Pool {
           requesterName: actor.displayName,
           requesterEmail: actor.email,
           order,
+          creditCost: ORDER_CREDITS,
           status: "queued",
           createdAt: Date.now(),
         };
@@ -346,6 +450,8 @@ export class Pool {
           jobId: id,
           objective: String(order?.objective || ""),
           requester: actor.displayName,
+          credits: ORDER_CREDITS,
+          creditState: "reserved",
         });
       }
       await this.state.storage.put(this.remoteBatchKey(batch), ids);
@@ -360,7 +466,13 @@ export class Pool {
       userBatches = [batch, ...userBatches.filter((item) => item !== batch)].slice(0, MAX_USER_BATCHES);
       await this.state.storage.put(this.remoteUserBatchesKey(actor.userId), userBatches);
       await this.saveQueue();
-      return Response.json({ batch, jobs: ids });
+      return Response.json({
+        batch,
+        jobs: ids,
+        creditsReserved: reserve,
+        balance: actorAccount.balance,
+        reserved: actorAccount.reserved,
+      });
     }
 
     if (url.pathname === "/rpc/claim") {
@@ -383,6 +495,8 @@ export class Pool {
         objective: String(job.order?.objective || ""),
         requester: job.requesterName,
         worker: actor.displayName,
+        credits: Number(job.creditCost || 0),
+        creditState: "reserved",
       });
       return Response.json(claimed);
     }
@@ -427,7 +541,15 @@ export class Pool {
         return Response.json({ error: "this account did not claim that job" }, { status: 403 });
       }
       if (job.status === "completed" || job.status === "failed") {
-        return Response.json({ returned: true, stored: true, jobId: job.id, status: job.status });
+        return Response.json({
+          returned: true,
+          stored: true,
+          alreadyStored: true,
+          jobId: job.id,
+          status: job.status,
+          creditsEarned: 0,
+          workerBalance: actorAccount.balance,
+        });
       }
       if (job.status !== "claimed") return Response.json({ error: "job is not claimed" }, { status: 409 });
       const fileRefs = Array.isArray(body.files) ? body.files.slice(0, 4) : [];
@@ -448,6 +570,28 @@ export class Pool {
         return Response.json({ error: "files must be uploaded through Overflow first" }, { status: 400 });
       }
       const status = body.status === "failed" ? "failed" : "completed";
+      const creditCost = Number(job.creditCost || 0);
+      let requesterAccount = await this.ensureAccount({
+        userId: job.requesterUserId,
+        displayName: job.requesterName,
+        email: job.requesterEmail,
+      });
+      let workerAccount = actorAccount;
+      if (requesterAccount.userId === workerAccount.userId) {
+        workerAccount = requesterAccount;
+      }
+      requesterAccount.reserved = Math.max(0, Number(requesterAccount.reserved || 0) - creditCost);
+      if (status === "completed") {
+        requesterAccount.spent = Number(requesterAccount.spent || 0) + creditCost;
+        workerAccount.balance = Number(workerAccount.balance || 0) + creditCost;
+        workerAccount.earned = Number(workerAccount.earned || 0) + creditCost;
+        workerAccount.completed = Number(workerAccount.completed || 0) + 1;
+      } else {
+        requesterAccount.balance = Number(requesterAccount.balance || 0) + creditCost;
+        requesterAccount.refunded = Number(requesterAccount.refunded || 0) + creditCost;
+      }
+      await this.saveAccount(requesterAccount);
+      if (workerAccount.userId !== requesterAccount.userId) await this.saveAccount(workerAccount);
       const completed = {
         ...job,
         status,
@@ -468,8 +612,19 @@ export class Pool {
         artifactChars: completed.result.artifact.length,
         artifact: completed.result.artifact.slice(0, ARTIFACT_PREVIEW_CHARS),
         files: completed.result.files.map((file) => file.name || "file"),
+        credits: creditCost,
+        creditState: status === "failed" ? "refunded" : "transferred",
       });
-      return Response.json({ returned: true, stored: true, jobId: job.id, status });
+      return Response.json({
+        returned: true,
+        stored: true,
+        jobId: job.id,
+        status,
+        creditsEarned: status === "completed" ? creditCost : 0,
+        workerBalance: workerAccount.balance,
+        requesterBalance: requesterAccount.balance,
+        requesterReserved: requesterAccount.reserved,
+      });
     }
 
     if (url.pathname === "/rpc/results") {
@@ -590,7 +745,10 @@ export class Pool {
 
     if (url.pathname === "/api/activity") {
       const events = (await this.state.storage.get("events")) || [];
-      const remoteJobs = await this.remoteJobs();
+      const remoteJobs = (await this.remoteJobs())
+        .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+      const accounts = (await this.accounts())
+        .sort((left, right) => Number(right.lastSeenAt || 0) - Number(left.lastSeenAt || 0));
       const sockets = this.socketsTagged("earner").map((ws) => {
         const meta = this.meta(ws);
         return { name: meta.name || "anon", busy: Boolean(meta.busy) };
@@ -602,38 +760,53 @@ export class Pool {
         entry.busy += socket.busy ? 1 : 0;
         byName.set(socket.name, entry);
       }
-      const inFlight = [];
+      const legacyJobs = this.queue
+        .filter((job) => job.transport !== "remote")
+        .map((job) => ({ ...job, status: "queued", creditCost: 0, createdAt: job.createdAt || 0 }));
       for (const ws of this.socketsTagged("earner")) {
         const meta = this.meta(ws);
-        if (meta.job) {
-          inFlight.push({
-            jobId: meta.job.id,
-            requester: meta.job.requesterName || "someone",
-            worker: meta.name || "anon",
-          });
-        }
-      }
-      for (const job of remoteJobs.filter((candidate) => candidate.status === "claimed")) {
-        inFlight.push({
-          jobId: job.id,
-          requester: job.requesterName || "someone",
-          worker: job.workerName || "someone",
+        if (!meta.job) continue;
+        const stored = await this.state.storage.get(this.inFlightKey(meta.job.id));
+        legacyJobs.push({
+          ...(stored || meta.job),
+          status: "claimed",
+          workerName: meta.name || "anon",
+          creditCost: 0,
         });
       }
+      const visibleJobs = [...remoteJobs, ...legacyJobs]
+        .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+      const queued = visibleJobs.filter((job) => job.status === "queued").length;
+      const claimed = visibleJobs.filter((job) => job.status === "claimed").length;
+      const completed = visibleJobs.filter((job) => job.status === "completed").length;
+      const failed = visibleJobs.filter((job) => job.status === "failed").length;
+      const availableCredits = accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0);
+      const reservedCredits = accounts.reduce((sum, account) => sum + Number(account.reserved || 0), 0);
+      const transferredCredits = accounts.reduce((sum, account) => sum + Number(account.earned || 0), 0);
       return Response.json(
         {
           now: Date.now(),
+          credits: {
+            starting: STARTING_CREDITS,
+            perOrder: ORDER_CREDITS,
+            issued: accounts.length * STARTING_CREDITS,
+            available: availableCredits,
+            reserved: reservedCredits,
+            transferred: transferredCredits,
+          },
+          totals: {
+            accounts: accounts.length,
+            jobs: visibleJobs.length,
+            queued,
+            claimed,
+            completed,
+            failed,
+          },
+          accounts: accounts.map((account) => this.publicAccount(account)),
+          jobs: visibleJobs.slice(0, 100).map((job) => this.publicJob(job)),
           machines: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
           online: sockets.length,
           idle: sockets.filter((s) => !s.busy).length,
-          queued: this.queue.filter((job) => job.status !== "claimed").length,
-          waiting: this.queue.filter((job) => job.status !== "claimed").map((job) => ({
-            jobId: job.id,
-            objective: String(job.order?.objective ?? ""),
-            requester: job.requesterName || "someone",
-            attempts: job.attempts || 0,
-          })),
-          inFlight,
           events,
         },
         { headers: { "access-control-allow-origin": "*", "cache-control": "no-store" } },

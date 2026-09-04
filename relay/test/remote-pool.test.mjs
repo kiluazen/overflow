@@ -89,6 +89,19 @@ async function remote(pool, path, userId, displayName, body) {
   return pool.handleRemote(request, new URL(request.url));
 }
 
+test("account initialization issues 1,000 credits exactly once", async () => {
+  const state = new MemoryState();
+  const pool = new Pool(state, {});
+  await state.ready;
+  const first = await (await remote(pool, "/rpc/account-init", "member-1", "Kushal", {})).json();
+  const second = await (await remote(pool, "/rpc/account-init", "member-1", "Kushal", {})).json();
+  expect(first.account).toMatchObject({ balance: 1000, reserved: 0, earned: 0, spent: 0 });
+  expect(second.account).toMatchObject({ balance: 1000, reserved: 0, earned: 0, spent: 0 });
+  const activity = await (await pool.fetch(new Request("https://overflow.internal/api/activity"))).json();
+  expect(activity.totals.accounts).toBe(1);
+  expect(activity.events.filter((event) => event.type === "joined")).toHaveLength(1);
+});
+
 test("remote requester, worker, and result complete one durable round trip", async () => {
   const state = new MemoryState();
   const pool = new Pool(state, { ARTIFACTS: new MemoryBucket() });
@@ -105,6 +118,7 @@ test("remote requester, worker, and result complete one durable round trip", asy
   const submitted = await submittedResponse.json();
   expect(submitted.batch).toMatch(/^[0-9a-f-]{36}$/);
   expect(submitted.jobs).toHaveLength(1);
+  expect(submitted).toMatchObject({ creditsReserved: 100, balance: 900, reserved: 100 });
 
   // A legacy websocket worker cannot steal an OAuth-backed queued job.
   expect(pool.takeNextJob()).toBeNull();
@@ -156,6 +170,26 @@ test("remote requester, worker, and result complete one durable round trip", asy
     files: [{ artifactId: uploadTicket.artifactId }],
   });
   expect(returnResponse.status).toBe(200);
+  expect(await returnResponse.json()).toMatchObject({
+    creditsEarned: 100,
+    workerBalance: 1100,
+    requesterBalance: 900,
+    requesterReserved: 0,
+  });
+
+  const requesterAccount = await (await remote(pool, "/rpc/account", "requester-1", "Kushal")).json();
+  expect(requesterAccount.account).toMatchObject({ balance: 900, reserved: 0, spent: 100 });
+  const workerAccount = await (await remote(pool, "/rpc/account", "worker-1", "Aparna")).json();
+  expect(workerAccount.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
+  const repeatedReturn = await remote(pool, "/rpc/return", "worker-1", "Aparna", {
+    jobId: claimed.id,
+    artifact: "The sourced memo.",
+    status: "completed",
+    files: [],
+  });
+  expect(await repeatedReturn.json()).toMatchObject({ alreadyStored: true, creditsEarned: 0, workerBalance: 1100 });
+  const workerAfterRepeat = await (await remote(pool, "/rpc/account", "worker-1", "Aparna")).json();
+  expect(workerAfterRepeat.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
 
   // The requester lost the original tool call and its batch UUID. OAuth
   // identity alone must recover every result and its actual file bytes.
@@ -225,14 +259,60 @@ test("public activity includes OAuth-backed queued and claimed work", async () =
   };
   await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: [order] });
   let activity = await (await pool.fetch(new Request("https://overflow.internal/api/activity"))).json();
-  expect(activity.queued).toBe(1);
-  expect(activity.waiting[0].requester).toBe("Kushal");
+  expect(activity.totals).toMatchObject({ accounts: 1, jobs: 1, queued: 1, claimed: 0 });
+  expect(activity.credits).toMatchObject({ starting: 1000, perOrder: 100, available: 900, reserved: 100 });
+  expect(activity.jobs[0]).toMatchObject({ requester: "Kushal", status: "queued", credits: 100 });
 
   await remote(pool, "/rpc/claim", "worker-1", "Aparna", {});
   activity = await (await pool.fetch(new Request("https://overflow.internal/api/activity"))).json();
-  expect(activity.queued).toBe(0);
-  expect(activity.inFlight).toHaveLength(1);
-  expect(activity.inFlight[0].worker).toBe("Aparna");
+  expect(activity.totals).toMatchObject({ accounts: 2, queued: 0, claimed: 1 });
+  expect(activity.jobs[0]).toMatchObject({ status: "claimed", worker: "Aparna" });
+  expect(activity.accounts.map((account) => account.name).sort()).toEqual(["Aparna", "Kushal"]);
+  expect(JSON.stringify(activity)).not.toContain("@example.com");
+  expect(JSON.stringify(activity)).not.toContain("requester-1");
+  expect(JSON.stringify(activity)).not.toContain("worker-1");
+});
+
+test("failed work refunds the requester and does not pay the worker", async () => {
+  const state = new MemoryState();
+  const pool = new Pool(state, {});
+  await state.ready;
+  const order = {
+    objective: "Attempt bounded work",
+    context: "",
+    expectedArtifact: "A result",
+    acceptanceTest: "Return an explicit outcome",
+  };
+  await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: [order] });
+  const claimed = await (await remote(pool, "/rpc/claim", "worker-1", "Aparna", {})).json();
+  const failed = await remote(pool, "/rpc/return", "worker-1", "Aparna", {
+    jobId: claimed.id,
+    artifact: "Required input was unavailable.",
+    status: "failed",
+    files: [],
+  });
+  expect(await failed.json()).toMatchObject({ creditsEarned: 0, requesterBalance: 1000, requesterReserved: 0 });
+  const requester = await (await remote(pool, "/rpc/account", "requester-1", "Kushal")).json();
+  expect(requester.account).toMatchObject({ balance: 1000, reserved: 0, spent: 0 });
+  const worker = await (await remote(pool, "/rpc/account", "worker-1", "Aparna")).json();
+  expect(worker.account).toMatchObject({ balance: 1000, earned: 0, completed: 0 });
+});
+
+test("delegation cannot reserve more credits than the requester owns", async () => {
+  const state = new MemoryState();
+  const pool = new Pool(state, {});
+  await state.ready;
+  const order = {
+    objective: "One bounded task",
+    context: "",
+    expectedArtifact: "A result",
+    acceptanceTest: "Done",
+  };
+  expect((await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: Array(8).fill(order) })).status).toBe(200);
+  expect((await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: Array(2).fill(order) })).status).toBe(200);
+  const overdraw = await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: [order] });
+  expect(overdraw.status).toBe(402);
+  expect((await overdraw.json()).error).toContain("not enough credits");
 });
 
 test("public activity never exposes private artifact URLs", async () => {

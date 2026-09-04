@@ -8,6 +8,10 @@ Overflow is one Codex plugin with two actions:
 - `/earn` takes one task into the current, visible Codex conversation, does it
   there, and returns the artifact.
 
+Every Google account starts with 1,000 credits. Delegating one order reserves
+100 credits; successful completion transfers them to the worker, while failure
+refunds the requester.
+
 The current dogfood hook triggers at 80% remaining so the low-usage flow can be
 tested without exhausting an account. The product threshold is 10%.
 
@@ -45,7 +49,9 @@ task or batch ID was lost.
 
 `/earn` claims exactly one currently queued order. It never starts `codex exec`,
 a hidden child, another task, or a subagent. If the pool is empty, it says so
-and ends without polling.
+and ends without polling. Before claiming, it establishes `~/Overflow earn` as
+its only local workspace. Each job gets a subfolder there; the worker must not
+read or write anywhere else.
 
 The worker cannot see the requester's conversation or local files. Orders must
 carry their own context. Returned text and file bytes travel through Overflow;
@@ -59,10 +65,16 @@ expiring download links.
   daemon, listener, or relay.
 - Identity: OAuth 2.1 to Overflow, with Google sign-in upstream.
 - Queue: one Cloudflare Durable Object.
+- Credits: a durable account ledger in the same Durable Object; 1,000 issued at
+  signup and 100 transferred per completed order.
 - Artifact storage: one private Cloudflare R2 bucket with expiring capability
   links.
-- Dashboard: [overflow.kushalsm.com](https://overflow.kushalsm.com).
+- Dashboard: [overflow.kushalsm.com](https://overflow.kushalsm.com), showing
+  live accounts, balances, work state, routes, timing, files, and activity.
 - Local runtime: none beyond the one-shot usage hook.
+
+The proposed friends-only routing layer is described in
+[`docs/friends-system.md`](docs/friends-system.md).
 
 ## Development
 

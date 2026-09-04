@@ -130,6 +130,7 @@ async function main() {
     const tools = await mcp("tools/list");
     const names = tools.tools.map((tool) => tool.name).sort();
     for (const required of [
+      "overflow_balance",
       "overflow_claim",
       "overflow_collect",
       "overflow_delegate",
@@ -140,6 +141,13 @@ async function main() {
     ]) {
       if (!names.includes(required)) throw new Error(`missing MCP tool ${required}`);
     }
+
+    const beforeBalance = await mcp("tools/call", {
+      name: "overflow_balance",
+      arguments: {},
+    });
+    const before = beforeBalance.structuredContent?.account;
+    if (!before || !Number.isFinite(before.balance)) throw new Error("balance returned no account ledger");
 
     const delegated = await mcp("tools/call", {
       name: "overflow_delegate",
@@ -154,6 +162,8 @@ async function main() {
     });
     const batch = delegated.structuredContent?.batch;
     if (!batch) throw new Error("delegate returned no batch ID");
+    if (delegated.structuredContent?.creditsReserved !== 100) throw new Error("delegate did not reserve 100 credits");
+    if (delegated.structuredContent?.balance !== before.balance - 100) throw new Error("delegate balance did not decrease");
 
     const claimed = await mcp("tools/call", {
       name: "overflow_claim",
@@ -184,7 +194,7 @@ async function main() {
     });
     if (uploaded.status !== 201) throw new Error(`artifact upload failed: ${uploaded.status} ${await uploaded.text()}`);
 
-    await mcp("tools/call", {
+    const returned = await mcp("tools/call", {
       name: "overflow_return",
       arguments: {
         jobId,
@@ -193,6 +203,16 @@ async function main() {
         files: [{ artifactId }],
       },
     });
+    if (returned.structuredContent?.creditsEarned !== 100) throw new Error("worker did not earn 100 credits");
+    const afterBalance = await mcp("tools/call", {
+      name: "overflow_balance",
+      arguments: {},
+    });
+    const after = afterBalance.structuredContent?.account;
+    if (after.balance !== before.balance || after.reserved !== before.reserved ||
+        after.earned !== before.earned + 100 || after.spent !== before.spent + 100) {
+      throw new Error("self-run credit transfer did not settle exactly once");
+    }
     const inbox = await mcp("tools/call", {
       name: "overflow_inbox",
       arguments: { limit: 5 },

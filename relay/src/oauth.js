@@ -1,5 +1,6 @@
 const CONSENT_TTL_SECONDS = 10 * 60;
 const BASE = "https://overflow.kushalsm.com";
+const POOL = "global";
 
 function escapeHtml(value) {
   return String(value)
@@ -128,14 +129,29 @@ export async function handleGoogleCallback(request, env) {
   await env.OAUTH_KV.delete(`consent:${nonce}`);
   const email = String(claims.email).trim().toLowerCase();
   const displayName = String(claims.name || email.split("@")[0]).trim();
+  const userId = `google-${claims.sub}`;
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
     request: parsed,
-    userId: `google-${claims.sub}`,
+    userId,
     scope: parsed.scope,
-    props: { userId: `google-${claims.sub}`, email, displayName },
+    props: { userId, email, displayName },
     metadata: { signedInVia: "google", issuedAt: Date.now() },
     revokeExistingGrants: false,
   });
+  try {
+    const pool = env.POOL.get(env.POOL.idFromName(POOL));
+    await pool.fetch("https://overflow.internal/rpc/account-init", {
+      method: "POST",
+      headers: {
+        "x-overflow-user-id": userId,
+        "x-overflow-display-name": displayName,
+        "x-overflow-email": email,
+      },
+    });
+  } catch {
+    // Authorization already succeeded. The first MCP call also initializes the
+    // account, so a transient pool failure must not strand the OAuth redirect.
+  }
   return Response.redirect(redirectTo, 302);
 }
 

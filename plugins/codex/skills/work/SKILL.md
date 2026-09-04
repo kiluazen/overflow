@@ -22,7 +22,9 @@ visible `/earn` sessions and bring their artifacts back here.
    before making the call.
 4. Call `overflow_delegate` exactly once. It stores the order durably and
    returns immediately with a batch UUID. Do not poll, keep the turn alive, or
-   duplicate the delegated work.
+   duplicate the delegated work. Each order reserves 100 credits from the
+   requester's balance; completion transfers them to the worker and failure
+   refunds them.
 5. If Codex task heartbeats are available, create one attached to this task:
    - Name it exactly `Overflow <batch UUID>`. Its automation ID will therefore
      be `overflow-<batch UUID>`.
@@ -35,8 +37,9 @@ visible `/earn` sessions and bring their artifacts back here.
      delete automation `overflow-<batch UUID>`. On its third incomplete run it
      may say the work is still running; the finite schedule then ends.
    - Never create more than one heartbeat for a batch.
-6. Tell the user the work is in Overflow, that this task will check at 20, 40,
-   and 60 minutes, and end the turn. Waiting between checks uses no model turn.
+6. Tell the user the work is in Overflow, the credits reserved and remaining
+   balance from the tool response, and that this task will check at 20, 40, and
+   60 minutes. End the turn. Waiting between checks uses no model turn.
 7. When the user next asks about Overflow or the returned work, call
    `overflow_inbox` once. The inbox is tied to the signed-in account, so it can
    recover completed work even when the original task closed or its batch ID
