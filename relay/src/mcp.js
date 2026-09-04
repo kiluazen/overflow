@@ -40,6 +40,7 @@ async function poolCall(env, path, actor, body) {
 
 function claimText(job) {
   const title = `Overflow: tsk ${job.id.slice(0, 4)} ${job.order.objective.replace(/\s+/g, " ").slice(0, 48)}`;
+  const workspace = `~/Overflow earn/${job.id.slice(0, 4)}`;
   return {
     content: [{
       type: "text",
@@ -47,17 +48,22 @@ function claimText(job) {
         `Claimed Overflow task ${job.id}.\n\n` +
         `Requested by: ${job.requesterName}\n\n` +
         `Rename this visible Codex task to: ${title}\n\n` +
+        `Workspace: ${workspace}\n\n` +
         `# Objective\n${job.order.objective}\n\n` +
         `# Context\n${job.order.context || "No additional context supplied."}\n\n` +
         `# Expected artifact\n${job.order.expectedArtifact}\n\n` +
         `# Acceptance test\n${job.order.acceptanceTest}\n\n` +
-        "Complete this in the current visible task, then call overflow_return with this exact job ID.",
+        `Do all local work inside ${workspace}. Do not inspect or modify any other local folder. ` +
+        "Complete this in the current visible task, upload files from that workspace, then call " +
+        "overflow_return with this exact job ID.",
     }],
     structuredContent: {
       claimed: true,
       jobId: job.id,
       shortId: job.id.slice(0, 4),
       suggestedTitle: title,
+      workspace,
+      credits: Number(job.creditCost || 0),
       requester: job.requesterName,
       order: job.order,
     },
@@ -93,13 +99,13 @@ function inboxText(result) {
 
 function createOverflowServer(env) {
   const server = new McpServer(
-    { name: "Overflow", version: "0.5.0" },
+    { name: "Overflow", version: "0.6.0" },
     {
       instructions:
         "Overflow is a remote, authenticated task pool. It never launches local executors or background processes. " +
         "Use overflow_delegate once to send work and end the requester turn without polling. " +
         "Use overflow_inbox to recover returned work without a batch ID. " +
-        "Workers use overflow_claim, overflow_prepare_upload for every file, and overflow_return.",
+        "Workers use overflow_claim, work only inside ~/Overflow earn, overflow_prepare_upload for every file, and overflow_return.",
     },
   );
 
@@ -115,7 +121,36 @@ function createOverflowServer(env) {
     async () => {
       const result = await poolCall(env, "/rpc/status", identity());
       return {
-        content: [{ type: "text", text: `${result.queued} task(s) queued and ${result.claimed} being worked on.` }],
+        content: [{
+          type: "text",
+          text:
+            `${result.queued} task(s) queued and ${result.claimed} being worked on. ` +
+            `You have ${result.account.balance} available credits and ${result.account.reserved} reserved.`,
+        }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  server.registerTool(
+    "overflow_balance",
+    {
+      title: "Check your Overflow credits",
+      description: "Show the signed-in account's available, reserved, earned, and spent Overflow credits.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { securitySchemes: SECURITY_SCHEMES },
+    },
+    async () => {
+      const result = await poolCall(env, "/rpc/account", identity());
+      const account = result.account;
+      return {
+        content: [{
+          type: "text",
+          text:
+            `${account.balance} credits available · ${account.reserved} reserved · ` +
+            `${account.earned} earned · ${account.spent} spent.`,
+        }],
         structuredContent: result,
       };
     },
@@ -138,7 +173,10 @@ function createOverflowServer(env) {
       return {
         content: [{
           type: "text",
-          text: `Delegated ${orders.length} order(s) as batch ${submitted.batch}. The batch is durable; use overflow_inbox to recover it later even if this task closes.`,
+          text:
+            `Delegated ${orders.length} order(s) as batch ${submitted.batch}. ` +
+            `${submitted.creditsReserved} credits are reserved; ${submitted.balance} remain available. ` +
+            "The batch is durable; use overflow_inbox to recover it later even if this task closes.",
         }],
         structuredContent: {
           delegated: true,
@@ -147,6 +185,9 @@ function createOverflowServer(env) {
           returned: 0,
           complete: false,
           results: [],
+          creditsReserved: submitted.creditsReserved,
+          balance: submitted.balance,
+          reserved: submitted.reserved,
         },
       };
     },
@@ -258,7 +299,15 @@ function createOverflowServer(env) {
     async ({ jobId, artifact, status, files }) => {
       const result = await poolCall(env, "/rpc/return", identity(), { jobId, artifact, status, files });
       return {
-        content: [{ type: "text", text: `Stored Overflow task ${jobId.slice(0, 4)} for its requester.` }],
+        content: [{
+          type: "text",
+          text: result.alreadyStored
+            ? `Overflow task ${jobId.slice(0, 4)} was already stored. Your balance remains ${result.workerBalance}.`
+            : `Stored Overflow task ${jobId.slice(0, 4)} for its requester. ` +
+              (result.status === "completed"
+                ? `You earned ${result.creditsEarned} credits and now have ${result.workerBalance}.`
+                : "The requester's reserved credits were refunded."),
+        }],
         structuredContent: result,
       };
     },
