@@ -276,7 +276,7 @@ async function callDelegate(params) {
   const orders = normalizeOrders(args);
   const timeoutSeconds = Math.min(
     3600,
-    Math.max(30, Number(args.timeoutSeconds ?? 1800)),
+    Math.max(30, Number(args.timeoutSeconds ?? 3600)),
   );
   let pool = null;
   try {
@@ -396,7 +396,7 @@ async function callClaim(params) {
   const args = params.arguments ?? {};
   const timeoutSeconds = Math.min(
     3600,
-    Math.max(30, Number(args.timeoutSeconds ?? 1800)),
+    Math.max(30, Number(args.timeoutSeconds ?? 3600)),
   );
   pendingClaim = true;
   try {
@@ -606,7 +606,7 @@ async function handleRequest(message) {
                 type: "integer",
                 minimum: 30,
                 maximum: 3600,
-                default: 1800,
+                default: 3600,
               },
             },
             required: ["orders"],
@@ -631,7 +631,7 @@ async function handleRequest(message) {
                 type: "integer",
                 minimum: 30,
                 maximum: 3600,
-                default: 1800,
+                default: 3600,
               },
             },
             additionalProperties: false,

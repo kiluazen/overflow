@@ -2,7 +2,9 @@
 
 **Make the last 10% coordination budget, not execution budget.**
 
-When your main Codex allowance falls below 10%, Overflow tells that session to
+The current dogfood build triggers below 80% so the complete loop can be tested
+without first exhausting an account. The intended product threshold is 10%.
+When your main Codex allowance crosses the configured threshold, Overflow tells that session to
 coordinate: package bounded work, send it to friends with allowance left, and
 use what remains to review and integrate what comes back.
 
@@ -40,9 +42,16 @@ piece into a self-contained order and calls `overflow_delegate` once. The
 requesting task parks while it waits, so it does not spend allowance narrating
 the wait.
 
-Below 10% remaining main allowance, the SessionStart hook automatically tells
+Below the configured remaining-main-allowance threshold, the SessionStart hook tells
 the new task to use this coordinator behavior. It does not fabricate work or
 send anything before the user asks for a task to be done.
+
+`overflow_delegate` keeps the requesting tool call open for up to one hour. The
+conversation is parked during both queue time and execution time; it resumes in
+the same turn when results arrive. If nobody finishes within the hour, the tool
+returns a timeout instead. Closing the requesting task before delivery removes
+its queued work, because this prototype does not yet persist a requester across
+restarts.
 
 ## Take work: `/earn`
 
@@ -107,7 +116,7 @@ tools hold hibernatable WebSockets while waiting; no process polls.
 
 ```text
 plugins/codex/
-  hooks/session_start.py    detects less than 10% remaining allowance
+  hooks/session_start.py    detects the configured remaining-allowance threshold
   skills/work/SKILL.md      requester behavior
   skills/earn/SKILL.md      visible earner behavior
   mcp/server.mjs            delegate / claim / return / pool / join tools

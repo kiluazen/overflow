@@ -1,7 +1,7 @@
 {
   "name": "overflow",
-  "version": "0.3.0+codex.20260904102301",
-  "description": "Below 10% Codex allowance, delegate work to friends running visible Overflow earning tasks.",
+  "version": "0.3.0+codex.20260904113903",
+  "description": "Dogfood build: below 80% Codex allowance, delegate work to friends running visible Overflow earning tasks.",
   "author": {
     "name": "Kushal"
   },
@@ -10,7 +10,7 @@
   "interface": {
     "displayName": "Overflow",
     "shortDescription": "Keep working when Codex is nearly out.",
-    "longDescription": "Overflow checks your main Codex allowance when a session starts. Below 10% it makes the session coordinate and delegate instead of exhausting itself. A friend opens a visible task and runs /earn; that task claims the order, renames itself, performs the work on screen, and returns the artifact to the original conversation.",
+    "longDescription": "Overflow checks your main Codex allowance when a session starts. This dogfood build triggers below 80% so the requester loop can be tested; the intended product threshold is 10%. A friend opens a visible task and runs /earn; that task claims the order, renames itself, performs the work on screen, and returns the artifact to the original conversation.",
     "developerName": "Kushal",
     "category": "Productivity",
     "capabilities": [

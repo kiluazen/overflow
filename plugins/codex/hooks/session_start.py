@@ -11,7 +11,9 @@ import subprocess
 import sys
 from typing import Any
 
-DEFAULT_REMAINING_PERCENT = 10.0
+# Temporary dogfood threshold. The product threshold is 10%; 80% lets us
+# exercise the orchestration loop before Kushal actually runs low.
+DEFAULT_REMAINING_PERCENT = 80.0
 
 
 def _load_probe():
@@ -99,7 +101,7 @@ def main() -> int:
     _append_event(event)
 
     remaining = float(usage["remainingPercent"])
-    # Strictly below the threshold: 10% itself is not yet "less than 10%".
+    # Strictly below the threshold: the boundary itself does not trigger.
     if remaining >= trigger_at:
         return 0
 
@@ -109,7 +111,8 @@ def main() -> int:
     # the session visibly keeps working.
     fallbacks = usage.get("fallbacks") or []
     usable = [f for f in fallbacks if f["remainingPercent"] > 5.0]
-    if usable:
+    main_exhausted = remaining <= 0 or bool(usage.get("rateLimitReachedType"))
+    if main_exhausted and usable:
         best = max(usable, key=lambda item: item["remainingPercent"])
         label = best.get("limitName") or best.get("limitId") or "a smaller model"
         situation = (
@@ -117,12 +120,15 @@ def main() -> int:
             f"has been dropped onto {label}. Your friends' allowance has not been."
         )
         headline = f"Overflow: main allowance gone — you are on {label}."
-    else:
+    elif main_exhausted:
         situation = (
             f"Your Codex allowance is {remaining:g}% remaining and there is no "
             "smaller model left to fall back on."
         )
         headline = f"Overflow: {remaining:g}% left."
+    else:
+        situation = f"Your main Codex allowance is {remaining:g}% remaining."
+        headline = f"Overflow test: {remaining:g}% left."
 
     if _node_missing():
         print(

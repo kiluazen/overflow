@@ -10,8 +10,8 @@ new hidden process, or another task to perform the order.
 
 ## Run exactly one order
 
-1. Call `overflow_claim`. If the queue is empty, the call waits without using
-   model allowance until an order arrives.
+1. Call `overflow_claim`. If the queue is empty, the call waits for up to one
+   hour without using model allowance until an order arrives.
 2. When it returns an order, immediately rename this current task to the
    `suggestedTitle` it provides. Use the Codex task-title tool; the title format
    is `Overflow: tsk <first four job-id characters> <short objective>`.
