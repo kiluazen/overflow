@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "overflow",
-      "description": "Dogfood build: below 80% remaining Codex allowance, delegate through /work; friends use visible /earn tasks to claim, perform, and return the work.",
+      "description": "Dogfood build: at or below 80% remaining Codex allowance, delegate through /work; friends use visible /earn tasks to claim, perform, and return the work.",
       "version": "0.3.0",
       "author": { "name": "Kushal", "url": "https://github.com/kiluazen" },
       "source": "./plugins/codex",

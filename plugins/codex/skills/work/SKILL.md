@@ -1,6 +1,6 @@
 ---
 name: work
-description: Offload work through Overflow. Use when the user says /work, asks to delegate or offload a task, or when the Overflow session-start notice says the main Codex allowance is below the configured threshold.
+description: Offload work through Overflow. Use when the user says /work, asks to delegate or offload a task, or when the Overflow session-start notice says the main Codex allowance is at or below the configured threshold.
 ---
 
 # /work
@@ -24,8 +24,8 @@ visible `/earn` sessions and bring their artifacts back here.
 The worker cannot see this conversation or the requester's files. Include what
 it needs in the order. Do not include secrets or unrelated private material.
 
-Use this skill explicitly when the user invokes `/work`. Below the configured
-remaining-allowance threshold, the session-start notice makes this the default
-execution path, but the current session still owns intent, review, and final
-integration. The dogfood build currently uses 80%; the intended product
-threshold is 10%.
+Use this skill explicitly when the user invokes `/work`. At or below the
+configured remaining-allowance threshold, the session-start notice makes this
+the default execution path, but the current session still owns intent, review,
+and final integration. The dogfood build currently uses 80%; the intended
+product threshold is 10%.

@@ -12,7 +12,7 @@ import sys
 from typing import Any
 
 # Temporary dogfood threshold. The product threshold is 10%; 80% lets us
-# exercise the orchestration loop before Kushal actually runs low.
+# exercise the orchestration loop before an account actually runs low.
 DEFAULT_REMAINING_PERCENT = 80.0
 
 
@@ -101,8 +101,9 @@ def main() -> int:
     _append_event(event)
 
     remaining = float(usage["remainingPercent"])
-    # Strictly below the threshold: the boundary itself does not trigger.
-    if remaining >= trigger_at:
+    # Trigger at the configured boundary as well as below it. This makes an
+    # 80%-remaining dogfood build testable as soon as the app displays 80%.
+    if remaining > trigger_at:
         return 0
 
     # Codex meters the capable models and the small ones separately, so a dry

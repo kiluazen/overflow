@@ -2,7 +2,7 @@
 
 **Make the last 10% coordination budget, not execution budget.**
 
-The current dogfood build triggers below 80% so the complete loop can be tested
+The current dogfood build triggers at or below 80% so the complete loop can be tested
 without first exhausting an account. The intended product threshold is 10%.
 When your main Codex allowance crosses the configured threshold, Overflow tells that session to
 coordinate: package bounded work, send it to friends with allowance left, and
@@ -42,7 +42,7 @@ piece into a self-contained order and calls `overflow_delegate` once. The
 requesting task parks while it waits, so it does not spend allowance narrating
 the wait.
 
-Below the configured remaining-main-allowance threshold, the SessionStart hook tells
+At or below the configured remaining-main-allowance threshold, the SessionStart hook tells
 the new task to use this coordinator behavior. It does not fabricate work or
 send anything before the user asks for a task to be done.
 
