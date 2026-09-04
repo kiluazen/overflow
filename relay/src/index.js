@@ -9,20 +9,24 @@ import {
   handleProtectedResource,
 } from "./oauth.js";
 
-// Overflow relay: one Durable Object holding the job board.
-//
-// Two kinds of socket connect to it and neither side ever polls:
-//   /earn      an idle Codex holds a socket open and is pushed jobs
-//   /delegate  a session that is nearly out of allowance parks on a socket
-//              until its artifacts come back
-//
-// Both are accepted through the hibernation API, so a laptop can sit in the
-// pool for hours without the DO being billed for the wall-clock it spends
-// waiting. Hibernation is why "no daemon, but stay available" is affordable.
+// Overflow relay: one Durable Object holding the job board. The authenticated
+// MCP transport uses short HTTP RPCs. Legacy invite-code clients still use the
+// WebSocket routes near the bottom of this file.
 
 const POOL = "global";
 const ACTIVITY_LIMIT = 60;
 const ARTIFACT_PREVIEW_CHARS = 1200;
+const PUBLIC_BASE = "https://overflow.kushalsm.com";
+const UPLOAD_TTL_MS = 15 * 60 * 1000;
+const DOWNLOAD_TTL_MS = 60 * 60 * 1000;
+const MAX_ARTIFACT_BYTES = 50 * 1024 * 1024;
+const INBOX_ARTIFACT_CHARS = 20_000;
+const MAX_USER_BATCHES = 50;
+
+function safeFileName(value) {
+  const name = String(value || "artifact").replace(/[\r\n"\\/]/g, "_").trim();
+  return name.slice(0, 255) || "artifact";
+}
 
 function unauthorized(reason) {
   return new Response(JSON.stringify({ error: reason }), {
@@ -90,14 +94,18 @@ const defaultHandler = {
     // experiment. Every route that moves an order requires either the old
     // dogfood invite code or an OAuth bearer handled by the MCP provider.
     const publicPaths = new Set(["/", "/board", "/bg.jpg", "/api/activity"]);
+    const capabilityPath = url.pathname.startsWith("/api/uploads/") ||
+      url.pathname.startsWith("/api/artifacts/");
     let identity = null;
-    if (!publicPaths.has(url.pathname)) {
+    if (!publicPaths.has(url.pathname) && !capabilityPath) {
       identity = await poolIdentity(token, env, url.searchParams.get("name") || "");
       if (!identity) return unauthorized("bad or missing Overflow token");
     }
 
     const id = env.POOL.idFromName(POOL);
     const pool = env.POOL.get(id);
+
+    if (capabilityPath) return pool.fetch(request);
 
     switch (url.pathname) {
       case "/":
@@ -181,6 +189,26 @@ export class Pool {
     return `remote-batch:${id}`;
   }
 
+  remoteUserBatchesKey(userId) {
+    return `remote-user-batches:${userId}`;
+  }
+
+  uploadKey(token) {
+    return `upload:${token}`;
+  }
+
+  fileKey(id) {
+    return `file:${id}`;
+  }
+
+  downloadKey(token) {
+    return `download:${token}`;
+  }
+
+  downloadGrantKey(id) {
+    return `download-grant:${id}`;
+  }
+
   actor(request) {
     return {
       userId: request.headers.get("x-overflow-user-id") || "",
@@ -192,6 +220,89 @@ export class Pool {
   async remoteJobs() {
     const entries = await this.state.storage.list({ prefix: "remote-job:" });
     return [...entries.values()];
+  }
+
+  async cleanupExpiredCapabilities() {
+    const now = Date.now();
+    for (const prefix of ["upload:", "download:"]) {
+      const entries = await this.state.storage.list({ prefix });
+      const expired = [...entries.entries()]
+        .filter(([, value]) => Number(value?.expiresAt || 0) <= now)
+        .map(([key]) => key);
+      await Promise.all(expired.map((key) => this.state.storage.delete(key)));
+    }
+  }
+
+  async presentFile(file) {
+    if (file?.objectKey) {
+      const name = safeFileName(file.name);
+      const contentType = file.contentType || "application/octet-stream";
+      const existing = await this.state.storage.get(this.downloadGrantKey(file.artifactId));
+      let token = existing?.token;
+      let expiresAt = Number(existing?.expiresAt || 0);
+      if (!token || expiresAt <= Date.now()) {
+        if (token) await this.state.storage.delete(this.downloadKey(token));
+        token = crypto.randomUUID();
+        expiresAt = Date.now() + DOWNLOAD_TTL_MS;
+        const ticket = { objectKey: file.objectKey, name, contentType, expiresAt };
+        await Promise.all([
+          this.state.storage.put(this.downloadKey(token), ticket),
+          this.state.storage.put(this.downloadGrantKey(file.artifactId), { token, expiresAt }),
+        ]);
+      }
+      return {
+        artifactId: file.artifactId,
+        name,
+        contentType,
+        size: Number(file.size || 0),
+        url: `${PUBLIC_BASE}/api/artifacts/${token}`,
+        expiresInSeconds: Math.max(0, Math.floor((expiresAt - Date.now()) / 1000)),
+      };
+    }
+
+    // Results returned before Overflow-owned uploads existed may already point
+    // at a shareable HTTPS file. Preserve that path so old completed work can
+    // still be recovered through the private requester inbox.
+    if (file?.url && /^https:\/\//i.test(String(file.url))) {
+      return {
+        name: safeFileName(file.name),
+        url: String(file.url),
+        legacy: true,
+      };
+    }
+    return {
+      name: safeFileName(file?.name),
+      unavailable: true,
+      reason: "This legacy worker returned a local or non-HTTPS path instead of uploading file bytes.",
+    };
+  }
+
+  async presentJob(job, compact = false) {
+    const result = job.result
+      ? {
+          artifact: String(job.result.artifact || "").slice(0, compact ? INBOX_ARTIFACT_CHARS : undefined),
+          artifactTruncated: compact && String(job.result.artifact || "").length > INBOX_ARTIFACT_CHARS,
+          files: await Promise.all((job.result.files || []).map((file) => this.presentFile(file))),
+        }
+      : undefined;
+    return {
+      id: job.id,
+      batch: job.batch,
+      index: job.index,
+      order: compact
+        ? {
+            objective: job.order?.objective,
+            expectedArtifact: job.order?.expectedArtifact,
+          }
+        : job.order,
+      status: job.status,
+      createdAt: job.createdAt,
+      claimedAt: job.claimedAt,
+      completedAt: job.completedAt,
+      requesterName: job.requesterName,
+      workerName: job.workerName,
+      result,
+    };
   }
 
   async handleRemote(request, url) {
@@ -238,6 +349,16 @@ export class Pool {
         });
       }
       await this.state.storage.put(this.remoteBatchKey(batch), ids);
+      let userBatches = await this.state.storage.get(this.remoteUserBatchesKey(actor.userId));
+      if (!Array.isArray(userBatches)) {
+        const existingJobs = (await this.remoteJobs()).filter((job) => job.requesterUserId === actor.userId);
+        userBatches = [...new Set(existingJobs
+          .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))
+          .map((job) => job.batch)
+          .filter(Boolean))];
+      }
+      userBatches = [batch, ...userBatches.filter((item) => item !== batch)].slice(0, MAX_USER_BATCHES);
+      await this.state.storage.put(this.remoteUserBatchesKey(actor.userId), userBatches);
       await this.saveQueue();
       return Response.json({ batch, jobs: ids });
     }
@@ -266,6 +387,38 @@ export class Pool {
       return Response.json(claimed);
     }
 
+    if (url.pathname === "/rpc/uploads") {
+      await this.cleanupExpiredCapabilities();
+      const body = await request.json();
+      const job = await this.state.storage.get(this.remoteJobKey(body.jobId || ""));
+      if (!job) return Response.json({ error: "unknown job" }, { status: 404 });
+      if (job.workerUserId !== actor.userId) {
+        return Response.json({ error: "this account did not claim that job" }, { status: 403 });
+      }
+      if (job.status !== "claimed") return Response.json({ error: "job is not claimed" }, { status: 409 });
+      const artifactId = crypto.randomUUID();
+      const uploadToken = crypto.randomUUID();
+      const name = safeFileName(body.name);
+      const contentType = String(body.contentType || "application/octet-stream").slice(0, 255);
+      const objectKey = `remote-artifacts/${job.requesterUserId}/${job.id}/${artifactId}/${name}`;
+      await this.state.storage.put(this.uploadKey(uploadToken), {
+        artifactId,
+        objectKey,
+        jobId: job.id,
+        workerUserId: actor.userId,
+        name,
+        contentType,
+        expiresAt: Date.now() + UPLOAD_TTL_MS,
+      });
+      return Response.json({
+        artifactId,
+        name,
+        uploadUrl: `${PUBLIC_BASE}/api/uploads/${uploadToken}`,
+        expiresInSeconds: UPLOAD_TTL_MS / 1000,
+        maxBytes: MAX_ARTIFACT_BYTES,
+      });
+    }
+
     if (url.pathname === "/rpc/return") {
       const body = await request.json();
       const job = await this.state.storage.get(this.remoteJobKey(body.jobId || ""));
@@ -274,9 +427,26 @@ export class Pool {
         return Response.json({ error: "this account did not claim that job" }, { status: 403 });
       }
       if (job.status === "completed" || job.status === "failed") {
-        return Response.json({ returned: true, delivered: true, jobId: job.id, status: job.status });
+        return Response.json({ returned: true, stored: true, jobId: job.id, status: job.status });
       }
       if (job.status !== "claimed") return Response.json({ error: "job is not claimed" }, { status: 409 });
+      const fileRefs = Array.isArray(body.files) ? body.files.slice(0, 4) : [];
+      const files = [];
+      for (const ref of fileRefs) {
+        if (ref?.artifactId) {
+          const file = await this.state.storage.get(this.fileKey(ref.artifactId));
+          if (!file || file.jobId !== job.id || file.workerUserId !== actor.userId) {
+            return Response.json({ error: "uploaded artifact does not belong to this job" }, { status: 403 });
+          }
+          files.push(file);
+          continue;
+        }
+        if (ref?.url && /^https:\/\//i.test(String(ref.url))) {
+          files.push({ name: safeFileName(ref.name), url: String(ref.url) });
+          continue;
+        }
+        return Response.json({ error: "files must be uploaded through Overflow first" }, { status: 400 });
+      }
       const status = body.status === "failed" ? "failed" : "completed";
       const completed = {
         ...job,
@@ -284,7 +454,7 @@ export class Pool {
         completedAt: Date.now(),
         result: {
           artifact: String(body.artifact || ""),
-          files: Array.isArray(body.files) ? body.files : [],
+          files,
         },
       };
       await this.state.storage.put(this.remoteJobKey(job.id), completed);
@@ -294,12 +464,12 @@ export class Pool {
         objective: String(job.order?.objective || ""),
         requester: job.requesterName,
         worker: actor.displayName,
-        delivered: true,
+        stored: true,
         artifactChars: completed.result.artifact.length,
         artifact: completed.result.artifact.slice(0, ARTIFACT_PREVIEW_CHARS),
         files: completed.result.files.map((file) => file.name || "file"),
       });
-      return Response.json({ returned: true, delivered: true, jobId: job.id, status });
+      return Response.json({ returned: true, stored: true, jobId: job.id, status });
     }
 
     if (url.pathname === "/rpc/results") {
@@ -313,8 +483,40 @@ export class Pool {
       return Response.json({
         batch,
         complete: jobs.length === ids.length && jobs.every((job) => job.status === "completed" || job.status === "failed"),
-        jobs,
+        jobs: await Promise.all(jobs.map((job) => this.presentJob(job))),
       });
+    }
+
+    if (url.pathname === "/rpc/inbox") {
+      await this.cleanupExpiredCapabilities();
+      const requestedLimit = Number(url.searchParams.get("limit") || 5);
+      const limit = Number.isInteger(requestedLimit) ? Math.min(10, Math.max(1, requestedLimit)) : 5;
+      let batchIds = await this.state.storage.get(this.remoteUserBatchesKey(actor.userId));
+      if (!Array.isArray(batchIds)) {
+        const jobs = (await this.remoteJobs())
+          .filter((job) => job.requesterUserId === actor.userId)
+          .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+        batchIds = [...new Set(jobs.map((job) => job.batch).filter(Boolean))].slice(0, MAX_USER_BATCHES);
+        await this.state.storage.put(this.remoteUserBatchesKey(actor.userId), batchIds);
+      }
+      const batches = [];
+      for (const batch of batchIds.slice(0, limit)) {
+        const ids = await this.state.storage.get(this.remoteBatchKey(batch));
+        if (!Array.isArray(ids)) continue;
+        const batchJobs = (await Promise.all(
+          ids.map((id) => this.state.storage.get(this.remoteJobKey(id))),
+        )).filter((job) => job?.requesterUserId === actor.userId);
+        if (!batchJobs.length) continue;
+        batches.push({
+          batch,
+          complete: batchJobs.every((job) => job.status === "completed" || job.status === "failed"),
+          createdAt: Math.min(...batchJobs.map((job) => Number(job.createdAt || 0))),
+          jobs: await Promise.all(
+            batchJobs.sort((a, b) => a.index - b.index).map((job) => this.presentJob(job, true)),
+          ),
+        });
+      }
+      return Response.json({ batches });
     }
 
     return Response.json({ error: "unknown rpc route" }, { status: 404 });
@@ -324,6 +526,60 @@ export class Pool {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/rpc/")) return this.handleRemote(request, url);
+
+    if (url.pathname.startsWith("/api/uploads/")) {
+      if (request.method !== "PUT") return new Response("method not allowed", { status: 405 });
+      if (!this.env.ARTIFACTS) return new Response("artifact storage unavailable", { status: 503 });
+      const token = url.pathname.slice("/api/uploads/".length);
+      const ticket = await this.state.storage.get(this.uploadKey(token));
+      if (!ticket) return new Response("unknown upload", { status: 404 });
+      if (Number(ticket.expiresAt || 0) < Date.now()) {
+        await this.state.storage.delete(this.uploadKey(token));
+        return new Response("upload expired", { status: 410 });
+      }
+      const size = Number(request.headers.get("content-length") || 0);
+      if (!Number.isInteger(size) || size <= 0 || size > MAX_ARTIFACT_BYTES || !request.body) {
+        return new Response(`artifact must be between 1 and ${MAX_ARTIFACT_BYTES} bytes`, { status: 413 });
+      }
+      await this.env.ARTIFACTS.put(ticket.objectKey, request.body, {
+        httpMetadata: { contentType: ticket.contentType },
+        customMetadata: { jobId: ticket.jobId, workerUserId: ticket.workerUserId },
+      });
+      const file = {
+        artifactId: ticket.artifactId,
+        objectKey: ticket.objectKey,
+        jobId: ticket.jobId,
+        workerUserId: ticket.workerUserId,
+        name: ticket.name,
+        contentType: ticket.contentType,
+        size,
+        uploadedAt: Date.now(),
+      };
+      await this.state.storage.put(this.fileKey(ticket.artifactId), file);
+      await this.state.storage.delete(this.uploadKey(token));
+      return Response.json({ uploaded: true, artifactId: ticket.artifactId, name: ticket.name, size }, { status: 201 });
+    }
+
+    if (url.pathname.startsWith("/api/artifacts/")) {
+      if (request.method !== "GET") return new Response("method not allowed", { status: 405 });
+      if (!this.env.ARTIFACTS) return new Response("artifact storage unavailable", { status: 503 });
+      const token = url.pathname.slice("/api/artifacts/".length);
+      const ticket = await this.state.storage.get(this.downloadKey(token));
+      if (!ticket) return new Response("unknown artifact", { status: 404 });
+      if (Number(ticket.expiresAt || 0) < Date.now()) {
+        await this.state.storage.delete(this.downloadKey(token));
+        return new Response("artifact link expired", { status: 410 });
+      }
+      const object = await this.env.ARTIFACTS.get(ticket.objectKey);
+      if (!object) return new Response("artifact missing", { status: 404 });
+      const headers = new Headers({
+        "cache-control": "private, no-store",
+        "content-disposition": `attachment; filename="${safeFileName(ticket.name)}"`,
+      });
+      if (typeof object.writeHttpMetadata === "function") object.writeHttpMetadata(headers);
+      else headers.set("content-type", ticket.contentType || "application/octet-stream");
+      return new Response(object.body, { headers });
+    }
 
     // Wipe the ledger. Token-gated, because it is the one thing here that
     // destroys something.

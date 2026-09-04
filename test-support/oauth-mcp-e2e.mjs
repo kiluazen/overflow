@@ -129,7 +129,15 @@ async function main() {
     });
     const tools = await mcp("tools/list");
     const names = tools.tools.map((tool) => tool.name).sort();
-    for (const required of ["overflow_claim", "overflow_collect", "overflow_delegate", "overflow_pool", "overflow_return"]) {
+    for (const required of [
+      "overflow_claim",
+      "overflow_collect",
+      "overflow_delegate",
+      "overflow_inbox",
+      "overflow_pool",
+      "overflow_prepare_upload",
+      "overflow_return",
+    ]) {
       if (!names.includes(required)) throw new Error(`missing MCP tool ${required}`);
     }
 
@@ -142,8 +150,6 @@ async function main() {
           expectedArtifact: "Plain text",
           acceptanceTest: "The artifact exactly matches the requested phrase.",
         }],
-        timeoutSeconds: 30,
-        waitForResult: false,
       },
     });
     const batch = delegated.structuredContent?.batch;
@@ -151,10 +157,32 @@ async function main() {
 
     const claimed = await mcp("tools/call", {
       name: "overflow_claim",
-      arguments: { timeoutSeconds: 5 },
+      arguments: {},
     });
     const jobId = claimed.structuredContent?.jobId;
     if (!jobId) throw new Error("claim returned no job ID");
+
+    const prepared = await mcp("tools/call", {
+      name: "overflow_prepare_upload",
+      arguments: {
+        jobId,
+        name: "round-trip.txt",
+        contentType: "text/plain",
+      },
+    });
+    const uploadUrl = prepared.structuredContent?.uploadUrl;
+    const artifactId = prepared.structuredContent?.artifactId;
+    if (!uploadUrl || !artifactId) throw new Error("prepare upload returned no capability");
+    const bytes = new TextEncoder().encode("Overflow file bytes passed");
+    const uploaded = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "content-length": String(bytes.byteLength),
+        "content-type": "text/plain",
+      },
+      body: bytes,
+    });
+    if (uploaded.status !== 201) throw new Error(`artifact upload failed: ${uploaded.status} ${await uploaded.text()}`);
 
     await mcp("tools/call", {
       name: "overflow_return",
@@ -162,20 +190,29 @@ async function main() {
         jobId,
         artifact: "Overflow round trip passed",
         status: "completed",
-        files: [],
+        files: [{ artifactId }],
       },
     });
-    const collected = await mcp("tools/call", {
-      name: "overflow_collect",
-      arguments: { batch },
+    const inbox = await mcp("tools/call", {
+      name: "overflow_inbox",
+      arguments: { limit: 5 },
     });
-    if (!collected.structuredContent?.complete) throw new Error("collected batch is not complete");
-    if (collected.structuredContent.results?.[0]?.result?.artifact !== "Overflow round trip passed") {
+    const recoveredBatch = inbox.structuredContent?.batches?.find((item) => item.batch === batch);
+    if (!recoveredBatch?.complete) throw new Error("inbox did not recover the completed batch");
+    if (recoveredBatch.jobs?.[0]?.result?.artifact !== "Overflow round trip passed") {
       throw new Error("returned artifact changed in transit");
+    }
+    const downloadUrl = recoveredBatch.jobs?.[0]?.result?.files?.[0]?.url;
+    if (!downloadUrl) throw new Error("inbox returned no artifact download URL");
+    const downloaded = await fetch(downloadUrl);
+    if (!downloaded.ok) throw new Error(`artifact download failed: ${downloaded.status}`);
+    const downloadedBytes = new Uint8Array(await downloaded.arrayBuffer());
+    if (!Buffer.from(downloadedBytes).equals(Buffer.from(bytes))) {
+      throw new Error("artifact bytes changed in transit");
     }
 
     console.log(`PASS authenticated MCP tools: ${names.join(", ")}`);
-    console.log("PASS delegate -> claim -> return -> collect");
+    console.log("PASS delegate -> claim -> upload bytes -> return -> inbox recovery -> download bytes");
   } finally {
     server.close();
   }
