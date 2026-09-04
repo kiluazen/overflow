@@ -33,7 +33,22 @@ codex plugin marketplace add kiluazen/overflow
 codex plugin add overflow@overflow
 ```
 
-Start a fresh Codex task after installation so its skills and tools load.
+### Trust the hook
+
+Installing Overflow does not automatically trust its SessionStart hook. Codex
+skips an untrusted hook; the desktop app may not interrupt a new task with an
+approval dialog.
+
+Before testing Overflow in the ChatGPT desktop app:
+
+1. Open **Plugins** → **Installed** → **Overflow**.
+2. Under **Hooks**, select **Review** (or **Trust all** after reviewing it).
+3. Confirm the “hook needs review” warning is gone.
+4. Start a fresh Codex task so the trusted hook, skills, and tools load.
+
+In Codex CLI, run `/hooks`, review Overflow's hook, and trust its current
+definition before starting the test session. If Overflow's hook definition is
+changed in a later release, Codex will require it to be reviewed again.
 
 ## Give work: `/work`
 
