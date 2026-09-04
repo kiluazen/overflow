@@ -1,6 +1,6 @@
 {
   "name": "overflow",
-  "version": "0.4.0+codex.20260904170232",
+  "version": "0.5.0",
   "description": "Delegate work to friends when your Codex allowance is running low.",
   "author": {
     "name": "Kushal"

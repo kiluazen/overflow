@@ -23,36 +23,37 @@ The hook is a one-shot Python usage check. It starts no daemon, Node process,
 ## What happens
 
 ```text
-requester's visible Codex task
+requester’s visible Codex task
   → /work → authenticated remote MCP → durable Overflow queue
-  → friend's visible Codex task → /earn
+  → friend’s visible Codex task → /earn
   → worker performs the task on screen → overflow_return
-  → original /work call receives the artifact
+  → requester’s private Overflow inbox receives the artifact
 ```
 
 The remote MCP connection identifies both sides using the Google account they
 connected during installation. A worker task is renamed to
 `Overflow: tsk <short id> <objective>` after it claims work.
 
-Normally `/work` makes one tool call and stays parked inside that call. Waiting
-happens on Overflow's server and makes no repeated model calls. If the
-requesting agent has useful coordination work to continue, it can submit
-without waiting and call `overflow_collect` once later using the returned batch
-ID.
+`/work` makes one short tool call, stores the batch durably, and ends the turn.
+It never polls. On a later user turn, `overflow_inbox` recovers all work for the
+signed-in requester even if the original task or batch ID was lost.
 
-`/earn` claims exactly one order. It never starts `codex exec`, a hidden child,
-another task, or a subagent. If the pool is empty, its one remote tool call can
-wait for work without consuming model turns.
+`/earn` claims exactly one currently queued order. It never starts `codex exec`,
+a hidden child, another task, or a subagent. If the pool is empty, it says so
+and ends without polling.
 
 The worker cannot see the requester's conversation or local files. Orders must
-carry their own context. Returned text travels through Overflow; returned files
-must currently have shareable HTTPS URLs.
+carry their own context. Returned text and file bytes travel through Overflow;
+workers upload files to short-lived, task-scoped URLs and requesters receive
+expiring download links.
 
 ## Architecture
 
 - Plugin: two skills, a SessionStart hook, and one remote MCP declaration.
 - Identity: OAuth 2.1 to Overflow, with Google sign-in upstream.
 - Queue: one Cloudflare Durable Object.
+- Artifact storage: one private Cloudflare R2 bucket with expiring capability
+  links.
 - Dashboard: [overflow.kushalsm.com](https://overflow.kushalsm.com).
 - Local runtime: none beyond the one-shot usage hook.
 

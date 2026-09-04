@@ -89,10 +89,11 @@ def main() -> int:
         "https://overflow.kushalsm.com in the user's Codex browser panel so they "
         "can watch the pool. Package one whole-task order and call "
         "`overflow_delegate` immediately as the next action; do not check the pool, "
-        "research, or narrate progress first. Call it exactly once with a 20-minute "
-        "timeout. The tool call parks this turn until a friend returns the artifact, "
-        "the relay fails, or the timeout expires. Do not perform or duplicate the "
-        "delegated work while it is pending, and never say an order was delegated "
+        "research, or narrate progress first. Call it exactly once. It returns a "
+        "durable batch immediately; do not poll, keep this turn alive, or duplicate "
+        "the delegated work. Tell the user the work is in Overflow and end the turn. "
+        "On a later user turn, call `overflow_inbox` once to recover completed work "
+        "even if the original batch ID was lost. Never say an order was delegated "
         "unless the tool was actually called."
     )
 

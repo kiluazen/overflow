@@ -22,6 +22,10 @@ class_name = "Pool"
 binding = "OAUTH_KV"
 id = "e5a5d9f65e59456089597500e747126c"
 
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "overflow-artifacts"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Pool"]
