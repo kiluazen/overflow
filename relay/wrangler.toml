@@ -2,6 +2,17 @@ name = "overflow-relay"
 main = "src/index.js"
 compatibility_date = "2026-04-28"
 
+# Adding a custom domain turns the workers.dev route off by default, and that
+# URL is compiled into every installed plugin -- losing it takes the whole pool
+# offline. Both hostnames have to stay live.
+workers_dev = true
+
+# A Worker custom domain provisions its own DNS record, so this is the whole of
+# the overflow.kushalsm.com setup.
+[[routes]]
+pattern = "overflow.kushalsm.com"
+custom_domain = true
+
 [[durable_objects.bindings]]
 name = "POOL"
 class_name = "Pool"

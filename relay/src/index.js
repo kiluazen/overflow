@@ -1,3 +1,5 @@
+import { BOARD_HTML } from "./board.js";
+
 // Overflow relay: one Durable Object holding the job board.
 //
 // Two kinds of socket connect to it and neither side ever polls:
@@ -10,6 +12,8 @@
 // waiting. Hibernation is why "no daemon, but stay available" is affordable.
 
 const POOL = "global";
+const ACTIVITY_LIMIT = 60;
+const ARTIFACT_PREVIEW_CHARS = 1200;
 
 function unauthorized(reason) {
   return new Response(JSON.stringify({ error: reason }), {
@@ -26,8 +30,12 @@ export default {
 
     // One shared invite code separates friends from the internet. Constant work
     // either way so the comparison does not leak length by timing.
+    // The board and the feed it reads are deliberately open: this pool is a
+    // few friends and the point is being able to watch it work. Everything that
+    // moves an order still needs the token.
+    const publicPaths = new Set(["/", "/board", "/api/activity"]);
     if (!expected || token.length !== expected.length || token !== expected) {
-      if (url.pathname !== "/") return unauthorized("bad or missing token");
+      if (!publicPaths.has(url.pathname)) return unauthorized("bad or missing token");
     }
 
     const id = env.POOL.idFromName(POOL);
@@ -35,9 +43,11 @@ export default {
 
     switch (url.pathname) {
       case "/":
-        return new Response("overflow relay\n", {
-          headers: { "content-type": "text/plain" },
+      case "/board":
+        return new Response(BOARD_HTML, {
+          headers: { "content-type": "text/html; charset=utf-8" },
         });
+      case "/api/activity":
       case "/earn":
       case "/delegate":
       case "/status":
@@ -64,6 +74,16 @@ export class Pool {
     });
   }
 
+  // A bounded log of what the relay already sees pass through it: an order
+  // queued, claimed, returned. Nothing is measured or derived that the relay
+  // did not already handle -- this only keeps the last of them so the board has
+  // something to show between bursts.
+  async recordEvent(event) {
+    const events = (await this.state.storage.get("events")) || [];
+    events.unshift({ at: Date.now(), ...event });
+    await this.state.storage.put("events", events.slice(0, ACTIVITY_LIMIT));
+  }
+
   async saveQueue() {
     await this.state.storage.put("queue", this.queue);
   }
@@ -77,6 +97,43 @@ export class Pool {
 
   async fetch(request) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/activity") {
+      const events = (await this.state.storage.get("events")) || [];
+      const sockets = this.socketsTagged("earner").map((ws) => {
+        const meta = this.meta(ws);
+        return { name: meta.name || "anon", busy: Boolean(meta.busy) };
+      });
+      const byName = new Map();
+      for (const socket of sockets) {
+        const entry = byName.get(socket.name) || { name: socket.name, sessions: 0, busy: 0 };
+        entry.sessions += 1;
+        entry.busy += socket.busy ? 1 : 0;
+        byName.set(socket.name, entry);
+      }
+      const inFlight = [];
+      for (const ws of this.socketsTagged("earner")) {
+        const meta = this.meta(ws);
+        if (meta.job) inFlight.push({ jobId: meta.job.id, worker: meta.name || "anon" });
+      }
+      return Response.json(
+        {
+          now: Date.now(),
+          machines: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
+          online: sockets.length,
+          idle: sockets.filter((s) => !s.busy).length,
+          queued: this.queue.length,
+          waiting: this.queue.map((job) => ({
+            jobId: job.id,
+            objective: String(job.order?.objective ?? ""),
+            attempts: job.attempts || 0,
+          })),
+          inFlight,
+          events,
+        },
+        { headers: { "access-control-allow-origin": "*", "cache-control": "no-store" } },
+      );
+    }
 
     if (url.pathname === "/status") {
       const sockets = this.socketsTagged("earner").map((ws) => {
@@ -170,12 +227,13 @@ export class Pool {
       }
       const batch = crypto.randomUUID();
       for (const [index, order] of orders.entries()) {
-        this.queue.push({
-          id: crypto.randomUUID(),
-          batch,
-          index,
-          requester: meta.connectionId,
-          order,
+        const id = crypto.randomUUID();
+        this.queue.push({ id, batch, index, requester: meta.connectionId, order });
+        await this.recordEvent({
+          type: "queued",
+          jobId: id,
+          objective: String(order?.objective ?? ""),
+          from: meta.name || "someone",
         });
       }
       await this.saveQueue();
@@ -257,6 +315,12 @@ export class Pool {
         state: "claimed",
         worker: earnerMeta.name,
       });
+      await this.recordEvent({
+        type: "claimed",
+        jobId: job.id,
+        objective: String(job.order?.objective ?? ""),
+        worker: earnerMeta.name,
+      });
     }
     if (this.queue.length !== before) await this.saveQueue();
   }
@@ -272,6 +336,10 @@ export class Pool {
       return;
     }
     this.setMeta(ws, { busy: false, job: null });
+    // The socket attachment only carries routing fields; the order itself lives
+    // in storage, so read it before deleting or the activity feed has nothing to
+    // show but a blank line.
+    const stored = await this.state.storage.get(this.inFlightKey(job.id));
     await this.state.storage.delete(this.inFlightKey(job.id));
 
     const requester = this.findByConnectionId(job.requester);
@@ -287,6 +355,20 @@ export class Pool {
         worker: meta.name,
       });
     }
+    const artifact = String(message.artifact ?? "");
+    await this.recordEvent({
+      type: message.status === "failed" ? "failed" : "returned",
+      jobId: job.id,
+      objective: String(stored?.order?.objective ?? job.order?.objective ?? ""),
+      worker: meta.name,
+      delivered: Boolean(requester),
+      artifactChars: artifact.length,
+      artifact: artifact.slice(0, ARTIFACT_PREVIEW_CHARS),
+      files: (Array.isArray(message.files) ? message.files : []).map((f) =>
+        typeof f === "string" ? f : f?.path || f?.name || "file",
+      ),
+    });
+
     // The visible earning task keeps this socket open while it works. Confirm
     // that the relay forwarded the artifact before it closes the task feed.
     this.send(ws, { type: "returned", id: job.id, delivered: Boolean(requester) });
