@@ -19,41 +19,77 @@ const order = {
     "A real .pptx file is returned; every material number has a dated source; Arecana-specific evidence is not conflated with the wider market; the deck states when six-month figures are unavailable; and slides are legible without requiring narration.",
 };
 
-const socket = new WebSocket(url);
 const timeoutHours = 6;
+let socket = null;
+let claimed = false;
+let completed = false;
+let lastPongAt = Date.now();
+
 const timeout = setTimeout(() => {
   console.error(`FAIL no result within ${timeoutHours} hours`);
-  socket.close();
+  completed = true;
+  socket?.close();
   process.exit(1);
 }, timeoutHours * 60 * 60 * 1000);
 
-socket.addEventListener("open", () => {
-  socket.send(JSON.stringify({ type: "submit", orders: [order] }));
-});
-socket.addEventListener("message", (event) => {
-  const message = JSON.parse(event.data);
-  if (message.type === "accepted") console.log(`QUEUED ${message.batch}`);
-  if (message.type === "progress" && message.state === "claimed") {
-    console.log(`CLAIMED ${message.job} by ${message.worker}`);
-  }
-  if (message.type === "result") {
-    clearTimeout(timeout);
-    console.log(`RESULT ${message.status} from ${message.worker}`);
-    console.log(message.artifact);
-    const destination = path.join("/Users/kushalsm/solo/research/overflow-returns", message.job);
-    for (const [index, file] of (message.files || []).entries()) {
-      const name = path.basename(file.name || `artifact-${index + 1}`);
-      fs.mkdirSync(destination, { recursive: true });
-      const filePath = path.join(destination, name);
-      fs.writeFileSync(filePath, Buffer.from(file.dataBase64, "base64"));
-      console.log(`SAVED ${filePath}`);
-    }
+const heartbeat = setInterval(() => {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  if (Date.now() - lastPongAt > 90_000) {
+    console.error("RECONNECTING requester heartbeat expired");
     socket.close();
-    process.exit(message.status === "completed" ? 0 : 1);
+    return;
   }
-});
-socket.addEventListener("error", () => {
-  clearTimeout(timeout);
-  console.error("FAIL requester socket error");
-  process.exit(1);
-});
+  socket.send(JSON.stringify({ type: "ping" }));
+}, 30_000);
+
+function connect() {
+  claimed = false;
+  lastPongAt = Date.now();
+  socket = new WebSocket(url);
+
+  socket.addEventListener("open", () => {
+    socket.send(JSON.stringify({ type: "submit", orders: [order] }));
+  });
+  socket.addEventListener("message", (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === "pong") lastPongAt = Date.now();
+    if (message.type === "accepted") console.log(`QUEUED ${message.batch}`);
+    if (message.type === "progress" && message.state === "claimed") {
+      claimed = true;
+      console.log(`CLAIMED ${message.job} by ${message.worker}`);
+    }
+    if (message.type === "result") {
+      completed = true;
+      clearTimeout(timeout);
+      clearInterval(heartbeat);
+      console.log(`RESULT ${message.status} from ${message.worker}`);
+      console.log(message.artifact);
+      const destination = path.join("/Users/kushalsm/solo/research/overflow-returns", message.job);
+      for (const [index, file] of (message.files || []).entries()) {
+        const name = path.basename(file.name || `artifact-${index + 1}`);
+        fs.mkdirSync(destination, { recursive: true });
+        const filePath = path.join(destination, name);
+        fs.writeFileSync(filePath, Buffer.from(file.dataBase64, "base64"));
+        console.log(`SAVED ${filePath}`);
+      }
+      socket.close();
+      process.exit(message.status === "completed" ? 0 : 1);
+    }
+  });
+  socket.addEventListener("error", () => {
+    console.error("REQUESTER socket error");
+  });
+  socket.addEventListener("close", () => {
+    if (completed) return;
+    if (claimed) {
+      console.error("FAIL requester disconnected after the job was claimed");
+      clearTimeout(timeout);
+      clearInterval(heartbeat);
+      process.exit(1);
+    }
+    console.error("RECONNECTING requester before claim");
+    setTimeout(connect, 1_000);
+  });
+}
+
+connect();
