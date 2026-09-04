@@ -39,6 +39,11 @@ one bounded piece of execution and nothing else.
    the work while waiting.
 5. Read what comes back. Accept it, or send back **one** precise correction as a
    new order. Do not fix it yourself unless it is faster than one sentence.
+6. **Do not retype the artifacts.** The tool result is already on screen. Copying
+   a worker's paragraphs into your own reply costs you the output tokens you
+   delegated to avoid — measured, that alone made delegating a 1,900-word job
+   cost *more* than writing it yourself. Add only what is missing: labels if the
+   order is unclear, connective text nobody was assigned, and corrections.
 
 ## Writing an order
 
