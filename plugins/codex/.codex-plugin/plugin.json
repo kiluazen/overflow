@@ -1,6 +1,6 @@
 {
   "name": "overflow",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Delegate work to friends when your Codex allowance is running low.",
   "author": {
     "name": "Kushal"
@@ -10,7 +10,7 @@
   "interface": {
     "displayName": "Overflow",
     "shortDescription": "Keep working when Codex is nearly out.",
-    "longDescription": "Sign in once during installation. Then review and trust Overflow's SessionStart hook. At low allowance, your session coordinates while a friend's visible /earn task performs the work and returns it. Queueing and identity run remotely; Overflow starts no local broker or background runtime.",
+    "longDescription": "Sign in once during installation. Then review and trust Overflow's SessionStart hook. At low allowance, your session coordinates while a friend's visible /earn task performs the work and returns it. A finite task heartbeat checks at 20, 40, and 60 minutes; Overflow starts no local broker or background runtime.",
     "developerName": "Kushal",
     "category": "Productivity",
     "capabilities": [

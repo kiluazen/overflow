@@ -21,9 +21,21 @@ visible `/earn` sessions and bring their artifacts back here.
    perform the work, speculate about progress, or emit repeated status messages
    before making the call.
 4. Call `overflow_delegate` exactly once. It stores the order durably and
-   returns immediately. Do not poll, keep the turn alive, or duplicate the
-   delegated work. Tell the user the work is in Overflow and end the turn.
-5. When the user next asks about Overflow or the returned work, call
+   returns immediately with a batch UUID. Do not poll, keep the turn alive, or
+   duplicate the delegated work.
+5. If Codex task heartbeats are available, create one attached to this task:
+   - Name it exactly `Overflow <batch UUID>`. Its automation ID will therefore
+     be `overflow-<batch UUID>`.
+   - Schedule it with `FREQ=MINUTELY;INTERVAL=20;COUNT=3`.
+   - Its prompt must call `overflow_collect` exactly once for that batch. If
+     incomplete, it must end without commentary or other work. If complete, it
+     must review and return the result and artifact links in this task, then
+     delete automation `overflow-<batch UUID>`. On its third incomplete run it
+     may say the work is still running; the finite schedule then ends.
+   - Never create more than one heartbeat for a batch.
+6. Tell the user the work is in Overflow, that this task will check at 20, 40,
+   and 60 minutes, and end the turn. Waiting between checks uses no model turn.
+7. When the user next asks about Overflow or the returned work, call
    `overflow_inbox` once. The inbox is tied to the signed-in account, so it can
    recover completed work even when the original task closed or its batch ID
    was lost. Review the returned artifact and links before handing them over.

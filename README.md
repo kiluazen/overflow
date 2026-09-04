@@ -25,6 +25,7 @@ The hook is a one-shot Python usage check. It starts no daemon, Node process,
 ```text
 requester’s visible Codex task
   → /work → authenticated remote MCP → durable Overflow queue
+  → task sleeps; Codex heartbeat checks at 20, 40, and 60 minutes
   → friend’s visible Codex task → /earn
   → worker performs the task on screen → overflow_return
   → requester’s private Overflow inbox receives the artifact
@@ -34,9 +35,13 @@ The remote MCP connection identifies both sides using the Google account they
 connected during installation. A worker task is renamed to
 `Overflow: tsk <short id> <objective>` after it claims work.
 
-`/work` makes one short tool call, stores the batch durably, and ends the turn.
-It never polls. On a later user turn, `overflow_inbox` recovers all work for the
-signed-in requester even if the original task or batch ID was lost.
+`/work` makes one short delegation call, stores the batch durably, and creates a
+finite Codex task heartbeat. The original turn ends immediately. Codex wakes
+the same task after 20 minutes, checks that batch once, and repeats at 40 and 60
+minutes only while needed. There is no model activity between those checks. A
+completed heartbeat returns the artifact in the original task and deletes
+itself. `overflow_inbox` remains the manual recovery path even if the original
+task or batch ID was lost.
 
 `/earn` claims exactly one currently queued order. It never starts `codex exec`,
 a hidden child, another task, or a subagent. If the pool is empty, it says so
@@ -50,6 +55,8 @@ expiring download links.
 ## Architecture
 
 - Plugin: two skills, a SessionStart hook, and one remote MCP declaration.
+- Wake-up: a finite Codex heartbeat attached to the requesting task; no local
+  daemon, listener, or relay.
 - Identity: OAuth 2.1 to Overflow, with Google sign-in upstream.
 - Queue: one Cloudflare Durable Object.
 - Artifact storage: one private Cloudflare R2 bucket with expiring capability
