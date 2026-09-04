@@ -13,7 +13,16 @@ The friend doing the work sees it. Overflow never starts a hidden Codex worker.
 One plugin contains both sides.
 
 In the ChatGPT desktop app: **Add plugin marketplace** → source
-`kiluazen/overflow`, ref `main`, sparse path `plugins/codex`. Then add Overflow.
+`kiluazen/overflow`, ref `main`, and leave **Sparse paths empty**. Then add
+Overflow. The marketplace manifest lives at the repository root; checking out
+only `plugins/codex` omits it and Codex correctly rejects the marketplace.
+
+If a sparse checkout is necessary, enter both paths on separate lines:
+
+```text
+.claude-plugin/marketplace.json
+plugins/codex
+```
 
 From a terminal:
 
