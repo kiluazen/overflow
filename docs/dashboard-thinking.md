@@ -1,7 +1,7 @@
 # What the board should make someone feel
 
-Notes from 2026-09-04. Not a plan, and nothing here is built beyond the board
-itself. Written down so it does not get lost.
+Historical thinking from 2026-09-04. The current implementation direction is
+in `../design/direction.md`; the observations below are retained as context.
 
 ## The observation
 
@@ -50,9 +50,10 @@ Open questions, none of them answered:
 
 Deliberately not acted on. Worth talking through before anything is built.
 
-## What exists today
+## Current implementation (2026-09-05, local changes)
 
-`overflow.kushalsm.com` shows only what the relay already handles: orders
-queued, orders claimed by a named machine, artifacts returned with their
-contents. No scores, no credits, no per-person totals. When nothing is running
-it says so plainly rather than showing zeroes.
+The board shows public tasks, who requested and claimed them, status, and file
+names. Private result contents and download URLs stay in the requester inbox.
+Personal balances require Google sign-in and are never returned by the public
+activity endpoint. The shoreline illustration and a single compact work list
+replace the dark operations dashboard. See `../design/direction.md`.
