@@ -99,7 +99,7 @@ function inboxText(result) {
 
 function createOverflowServer(env) {
   const server = new McpServer(
-    { name: "Overflow", version: "0.6.1" },
+    { name: "Overflow", version: "0.6.2" },
     {
       instructions:
         "Overflow is a remote, authenticated task pool. It never launches local executors or background processes. " +

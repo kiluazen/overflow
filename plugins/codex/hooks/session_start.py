@@ -9,9 +9,9 @@ import os
 from pathlib import Path
 import sys
 
-# Temporary dogfood threshold. The product threshold is 10%; 80% lets us
-# exercise the orchestration loop before an account actually runs low.
-DEFAULT_REMAINING_PERCENT = 80.0
+# Switch the session into orchestration mode when the main allowance reaches
+# 15% remaining.
+DEFAULT_REMAINING_PERCENT = 15.0
 
 
 def _load_probe():
@@ -47,8 +47,7 @@ def main() -> int:
         return 0
 
     remaining = float(usage["remainingPercent"])
-    # Trigger at the configured boundary as well as below it. This makes an
-    # 80%-remaining dogfood build testable as soon as the app displays 80%.
+    # Trigger at the configured boundary as well as below it.
     if remaining > trigger_at:
         return 0
 
@@ -75,7 +74,7 @@ def main() -> int:
         headline = f"Overflow: {remaining:g}% left."
     else:
         situation = f"Your main Codex allowance is {remaining:g}% remaining."
-        headline = f"Overflow test: {remaining:g}% left."
+        headline = f"Overflow: {remaining:g}% left."
 
     # Give the
     # nearly-empty session the complete behavior change without making it hunt
