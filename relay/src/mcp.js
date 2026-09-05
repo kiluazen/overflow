@@ -40,7 +40,7 @@ async function poolCall(env, path, actor, body) {
 
 function claimText(job) {
   const title = `Overflow: tsk ${job.id.slice(0, 4)} ${job.order.objective.replace(/\s+/g, " ").slice(0, 48)}`;
-  const workspace = `~/Overflow earn/${job.id.slice(0, 4)}`;
+  const workspace = `<chosen earning folder>/${job.id}`;
   return {
     content: [{
       type: "text",
@@ -48,7 +48,8 @@ function claimText(job) {
         `Claimed Overflow task ${job.id}.\n\n` +
         `Requested by: ${job.requesterName}\n\n` +
         `Rename this visible Codex task to: ${title}\n\n` +
-        `Workspace: ${workspace}\n\n` +
+        `Workspace: ${workspace}. Use the folder this machine's user chose before the claim. ` +
+        `If no folder was chosen, ask now before any local work; never default to a home-directory path.\n\n` +
         `# Objective\n${job.order.objective}\n\n` +
         `# Context\n${job.order.context || "No additional context supplied."}\n\n` +
         `# Expected artifact\n${job.order.expectedArtifact}\n\n` +
@@ -62,7 +63,8 @@ function claimText(job) {
       jobId: job.id,
       shortId: job.id.slice(0, 4),
       suggestedTitle: title,
-      workspace,
+      workspaceSubdirectory: job.id,
+      workspacePolicy: "Use only the earning folder explicitly chosen by this machine's user.",
       credits: Number(job.creditCost || 0),
       requester: job.requesterName,
       order: job.order,
@@ -99,13 +101,14 @@ function inboxText(result) {
 
 function createOverflowServer(env) {
   const server = new McpServer(
-    { name: "Overflow", version: "0.6.2" },
+    { name: "Overflow", version: "0.7.0" },
     {
       instructions:
         "Overflow is a remote, authenticated task pool. It never launches local executors or background processes. " +
         "Use overflow_delegate once to send work and end the requester turn without polling. " +
         "Use overflow_inbox to recover returned work without a batch ID. " +
-        "Workers use overflow_claim, work only inside ~/Overflow earn, overflow_prepare_upload for every file, and overflow_return. " +
+        "Workers first ask where to work, recommending an overflow-earn subfolder in the current project. " +
+        "Then use overflow_claim, work only inside the chosen folder's job subdirectory, overflow_prepare_upload for every file, and overflow_return. " +
         "A claim lasts 90 minutes; abandoned work is automatically offered to another worker and refunded after two expired claims.",
     },
   );

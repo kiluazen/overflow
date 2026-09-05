@@ -2,18 +2,22 @@
 
 **Make the last 15% coordination budget, not execution budget.**
 
-Overflow is one Codex plugin with two actions:
+Overflow shares spare AI allowance between people. Keep talking to Codex as
+usual: when the usage hook detects 15% remaining or less, the agent packages
+substantive work and delegates it. You do not need to write a separate order.
+`/work` is the manual shortcut for people who want to delegate earlier.
 
-- `/work` sends a bounded task to the shared pool.
-- `/earn` takes one task into the current, visible Codex conversation, does it
-  there, and returns the artifact.
+Have spare allowance today? `/earn` takes one task into your current, visible
+Codex conversation. Help someone now, keep the credits for when you need work
+next week.
 
 Every Google account starts with 1,000 credits. Delegating one order reserves
 100 credits; successful completion transfers them to the worker, while failure
 refunds the requester.
 
 The SessionStart hook switches the task into orchestration mode when the main
-Codex allowance reaches 15% remaining.
+Codex allowance is at 15% remaining or less. It checks at startup, resume, and
+clear; it does not continuously monitor a running task.
 
 ## Install
 
@@ -28,7 +32,7 @@ The hook is a one-shot Python usage check. It starts no daemon, Node process,
 
 ```text
 requester’s visible Codex task
-  → /work → authenticated remote MCP → durable Overflow queue
+  → low-allowance detection → agent prepares order → durable Overflow queue
   → task sleeps; Codex heartbeat checks at 20, 40, and 60 minutes
   → friend’s visible Codex task → /earn
   → worker performs the task on screen → overflow_return
@@ -39,7 +43,7 @@ The remote MCP connection identifies both sides using the Google account they
 connected during installation. A worker task is renamed to
 `Overflow: tsk <short id> <objective>` after it claims work.
 
-`/work` makes one short delegation call, stores the batch durably, and creates a
+Automatic delegation (or the manual `/work` shortcut) makes one short delegation call, stores the batch durably, and creates a
 finite Codex task heartbeat. The original turn ends immediately. Codex wakes
 the same task after 20 minutes, checks that batch once, and repeats at 40 and 60
 minutes only while needed. There is no model activity between those checks. A
@@ -49,9 +53,13 @@ task or batch ID was lost.
 
 `/earn` claims exactly one currently queued order. It never starts `codex exec`,
 a hidden child, another task, or a subagent. If the pool is empty, it says so
-and ends without polling. Before claiming, it establishes `~/Overflow earn` as
-its only local workspace. Each job gets a subfolder there; the worker must not
-read or write anywhere else. Claims last 90 minutes. An abandoned claim is
+and ends without polling. Its first action is a folder choice: use
+`<current project>/overflow-earn` (recommended), or choose another folder.
+It waits for the answer before creating folders or claiming work, and reuses
+that explicit choice within the conversation. Each job gets a full-job-ID
+subfolder; the worker must not read or write anywhere else, including the
+surrounding project. Existing project access reduces permission surprises but
+does not bypass macOS controls. This is an agent instruction, not an OS sandbox. Claims last 90 minutes. An abandoned claim is
 offered to one more worker; a second abandoned claim closes the order and
 refunds the requester automatically. Durable Object alarms enforce this without
 model polling or a process on either laptop.
@@ -73,7 +81,9 @@ expiring download links.
 - Artifact storage: one private Cloudflare R2 bucket with expiring capability
   links.
 - Dashboard: [overflow.kushalsm.com](https://overflow.kushalsm.com), showing
-  live accounts, balances, work state, routes, timing, files, and activity.
+  public work, requester/worker routes and filenames. Google sign-in reveals
+  only your own credits. Browser sessions use the same Google account identity
+  as the plugin, with an HttpOnly cookie; the public API contains no balances.
 - Local runtime: none beyond the one-shot usage hook.
 
 The proposed friends-only routing layer is described in

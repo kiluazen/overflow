@@ -52,6 +52,13 @@ it needs in the order. Do not include secrets or unrelated private material.
 Overflow identity comes from the Google account connected during plugin
 installation. Never invent a task-specific identity.
 
-Use this skill explicitly when the user invokes `/work`. At or below 15%
+Automatic delegation is the primary flow. The user keeps asking Codex for work;
+they do not need to type `/work` or prepare the order themselves. When the
+session-start usage notice reports 15% remaining or less, this agent turns the
+user's intent into a bounded, self-contained order. Preserve private local
+context and final review in this conversation. Do not delegate a greeting,
+status request, or unrelated task solely because the allowance is low.
+
+`/work` is the manual shortcut for people who want to delegate earlier. At or below 15%
 remaining allowance, the session-start notice makes this the default execution
 path, but the current session still owns intent, review, and final integration.

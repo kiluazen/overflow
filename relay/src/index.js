@@ -1,6 +1,8 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { BOARD_HTML } from "./board.js";
 import { BG_JPEG_BASE64 } from "./bg.js";
+import { SHORELINE_JPEG_BASE64 } from "./shoreline.js";
+import { startDashboardLogin, dashboardAccount, logoutDashboard } from "./dashboard-auth.js";
 import { createOverflowMcpHandler } from "./mcp.js";
 import {
   handleAuthorize,
@@ -82,7 +84,7 @@ async function poolIdentity(token, env, requestedName) {
   }
 }
 
-const defaultHandler = {
+export const defaultHandler = {
   async fetch(request, env) {
     const url = new URL(request.url);
     const token = url.searchParams.get("token") || "";
@@ -97,11 +99,14 @@ const defaultHandler = {
     }
     if (url.pathname === "/auth/google/start") return handleGoogleStart(request, env);
     if (url.pathname === "/auth/google/callback") return handleGoogleCallback(request, env);
+    if (url.pathname === "/auth/dashboard/start") return startDashboardLogin(request, env);
+    if (url.pathname === "/auth/dashboard/logout") return logoutDashboard(request, env);
+    if (url.pathname === "/api/account") return dashboardAccount(request, env);
 
     // The board and its activity feed are public so friends can watch the
     // experiment. Every route that moves an order requires either the old
     // dogfood invite code or an OAuth bearer handled by the MCP provider.
-    const publicPaths = new Set(["/", "/board", "/bg.jpg", "/api/activity"]);
+    const publicPaths = new Set(["/", "/board", "/bg.jpg", "/shoreline-v2.jpg", "/api/activity"]);
     const capabilityPath = url.pathname.startsWith("/api/uploads/") ||
       url.pathname.startsWith("/api/artifacts/");
     let identity = null;
@@ -121,8 +126,9 @@ const defaultHandler = {
         return new Response(BOARD_HTML, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
-      case "/bg.jpg": {
-        const binary = atob(BG_JPEG_BASE64);
+      case "/bg.jpg":
+      case "/shoreline-v2.jpg": {
+        const binary = atob(url.pathname === "/bg.jpg" ? BG_JPEG_BASE64 : SHORELINE_JPEG_BASE64);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
         return new Response(bytes, {
@@ -323,8 +329,12 @@ export class Pool {
   }
 
   publicEvent(event) {
-    const { artifact: _artifact, ...safe } = event;
-    return safe;
+    // Explicit allowlist: neither balances nor private result data belong on
+    // the public board, even if new internal event fields are added later.
+    const fields = ["at", "type", "jobId", "objective", "requester", "worker", "member",
+      "attempts", "leaseExpiresAt", "artifactChars", "files"];
+    return Object.fromEntries(fields.filter((key) => key in event)
+      .map((key) => [key, key === "files" ? (event.files || []).map((file) => safeFileName(typeof file === "string" ? file : file.name)) : event[key]]));
   }
 
   async remoteJobs() {
@@ -924,20 +934,9 @@ export class Pool {
       const claimed = visibleJobs.filter((job) => job.status === "claimed").length;
       const completed = visibleJobs.filter((job) => job.status === "completed").length;
       const failed = visibleJobs.filter((job) => job.status === "failed").length;
-      const availableCredits = accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0);
-      const reservedCredits = accounts.reduce((sum, account) => sum + Number(account.reserved || 0), 0);
-      const transferredCredits = accounts.reduce((sum, account) => sum + Number(account.earned || 0), 0);
       return Response.json(
         {
           now: Date.now(),
-          credits: {
-            starting: STARTING_CREDITS,
-            perOrder: ORDER_CREDITS,
-            issued: accounts.length * STARTING_CREDITS,
-            available: availableCredits,
-            reserved: reservedCredits,
-            transferred: transferredCredits,
-          },
           totals: {
             accounts: accounts.length,
             jobs: visibleJobs.length,
@@ -946,7 +945,6 @@ export class Pool {
             completed,
             failed,
           },
-          accounts: accounts.map((account) => this.publicAccount(account)),
           jobs: visibleJobs.slice(0, 100).map((job) => this.publicJob(job)),
           machines: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
           online: sockets.length,

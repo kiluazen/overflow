@@ -273,14 +273,19 @@ test("public activity includes OAuth-backed queued and claimed work", async () =
   await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: [order] });
   let activity = await (await pool.fetch(new Request("https://overflow.internal/api/activity"))).json();
   expect(activity.totals).toMatchObject({ accounts: 1, jobs: 1, queued: 1, claimed: 0 });
-  expect(activity.credits).toMatchObject({ starting: 1000, perOrder: 100, available: 900, reserved: 100 });
+  expect(activity).not.toHaveProperty("credits");
+  expect(activity).not.toHaveProperty("accounts");
   expect(activity.jobs[0]).toMatchObject({ requester: "Kushal", status: "queued", credits: 100 });
 
   await remote(pool, "/rpc/claim", "worker-1", "Aparna", {});
   activity = await (await pool.fetch(new Request("https://overflow.internal/api/activity"))).json();
   expect(activity.totals).toMatchObject({ accounts: 2, queued: 0, claimed: 1 });
   expect(activity.jobs[0]).toMatchObject({ status: "claimed", worker: "Aparna" });
-  expect(activity.accounts.map((account) => account.name).sort()).toEqual(["Aparna", "Kushal"]);
+  expect(activity.jobs[0]).toMatchObject({ requester: "Kushal", worker: "Aparna" });
+  const publicJson = JSON.stringify(activity);
+  for (const field of ["balance", "reserved", "earned", "spent", "refunded", "workerBalance", "requesterBalance"]) {
+    expect(publicJson).not.toContain(`"${field}":`);
+  }
   expect(JSON.stringify(activity)).not.toContain("@example.com");
   expect(JSON.stringify(activity)).not.toContain("requester-1");
   expect(JSON.stringify(activity)).not.toContain("worker-1");

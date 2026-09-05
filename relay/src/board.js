@@ -1,131 +1,64 @@
-// Dense public operations board. It renders one authoritative snapshot from
-// the Durable Object instead of reconstructing state from overlapping feeds.
+// Public work stays visible; account balances come only from /api/account.
 export const BOARD_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Overflow</title>
+<meta name="theme-color" content="#f5f5ef">
+<meta name="description" content="Share spare AI allowance with friends. Earn credits now, use them when you need a hand.">
+<title>Overflow — a little help from your friends</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root{color-scheme:dark;--ground:#090c0a;--panel:#0e1310;--panel2:#121914;
-    --ink:#dff8e5;--muted:#78927e;--hair:#203126;--green:#71efa0;
-    --yellow:#eacb70;--red:#ff8b77;--blue:#8eafff;--mono:"Geist Mono",monospace;
-    --sans:"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-  *{box-sizing:border-box}html,body{min-height:100%}body{margin:0;background:var(--ground);
-    color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.35}
-  main{width:min(1500px,100%);margin:0 auto;padding:24px}
-  header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;
-    padding-bottom:18px;border-bottom:1px solid var(--hair)}
-  h1{font-size:24px;line-height:1;margin:0 0 8px;font-weight:600;letter-spacing:-.03em}
-  .lede{color:var(--muted);font-family:var(--mono);font-size:12px}
-  .live{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--muted)}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px #71efa077}
-  #error{display:none;margin-top:12px;padding:9px 12px;border:1px solid #6e3329;
-    color:var(--red);background:#1d100d;font-family:var(--mono);font-size:11px}
-  .metrics{display:grid;grid-template-columns:repeat(7,minmax(110px,1fr));gap:1px;
-    background:var(--hair);border:1px solid var(--hair);margin:18px 0}
-  .metric{background:var(--panel);padding:13px 14px;min-height:76px}
-  .metric b{display:block;font-family:var(--mono);font-size:23px;font-weight:500;
-    letter-spacing:-.04em;margin-bottom:7px}.metric span{color:var(--muted);font-size:11px}
-  .grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,.7fr);gap:18px}
-  .stack{display:grid;gap:18px;align-content:start}.section{border:1px solid var(--hair);background:var(--panel)}
-  .section-head{display:flex;justify-content:space-between;gap:18px;align-items:center;
-    padding:11px 13px;border-bottom:1px solid var(--hair)}
-  h2{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.09em;font-weight:600}
-  .hint{font-family:var(--mono);color:var(--muted);font-size:10px}
-  .scroll{overflow:auto;max-height:570px}table{width:100%;border-collapse:collapse;min-width:720px}
-  th{position:sticky;top:0;z-index:1;background:var(--panel2);color:var(--muted);
-    text-align:left;font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.08em;
-    padding:8px 11px;border-bottom:1px solid var(--hair)}
-  td{padding:10px 11px;border-bottom:1px solid var(--hair);vertical-align:top}
-  tr:last-child td{border-bottom:0}.mono{font-family:var(--mono);font-size:11px}
-  .muted{color:var(--muted)}.money{color:var(--yellow);font-family:var(--mono);white-space:nowrap}
-  .objective{max-width:580px}.objective b{display:-webkit-box;font-weight:500;margin-bottom:3px;
-    -webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-  .objective small{display:block;color:var(--muted);font-size:11px;white-space:nowrap;
-    overflow:hidden;text-overflow:ellipsis;max-width:520px}.route{white-space:nowrap;font-size:12px}
-  .state{display:inline-flex;align-items:center;gap:7px;font:500 10px var(--mono);
-    text-transform:uppercase;letter-spacing:.05em}.state:before{content:"";width:7px;height:7px;
-    border-radius:50%;background:var(--muted)}.state.claimed:before{background:var(--blue)}
-  .state.completed:before{background:var(--green)}.state.failed:before{background:var(--red)}
-  details summary{cursor:pointer;color:var(--blue);font:11px var(--mono);list-style:none}
-  details summary::-webkit-details-marker{display:none}pre{white-space:pre-wrap;font:11px/1.55 var(--mono);
-    color:var(--ink);border-left:2px solid var(--hair);padding-left:10px;max-height:220px;overflow:auto}
-  .files{color:var(--muted);font:10px/1.5 var(--mono);margin-top:5px}
-  .accounts{min-width:620px}.accounts td:first-child{font-weight:500}.positive{color:var(--green)}
-  .events{list-style:none;padding:0;margin:0;max-height:360px;overflow:auto}
-  .events li{display:grid;grid-template-columns:54px 66px 1fr;gap:8px;padding:9px 12px;
-    border-bottom:1px solid var(--hair);font-size:11px}.events li:last-child{border:0}
-  .events time,.events code{font:10px var(--mono);color:var(--muted)}.events li span{min-width:0;overflow-wrap:anywhere}
-  .empty{padding:26px 14px;color:var(--muted);font:11px var(--mono);text-align:center}
-  .rule{padding:13px;color:var(--muted);font-size:12px}.rule b{color:var(--ink);font-family:var(--mono)}
-  @media(max-width:980px){.metrics{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:1fr}}
-  @media(max-width:620px){main{padding:16px}.metrics{grid-template-columns:repeat(2,1fr)}header{align-items:flex-start;
-    flex-direction:column}.metric{min-height:68px}.events li{grid-template-columns:48px 58px 1fr}}
+:root{color-scheme:light;--paper:#f5f5ef;--ink:#29342f;--muted:#606c63;--sea:#376451;--line:#d5dbd1;--wash:#e8ede5;--warn:#855b35;--sans:Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--paper);font:14px/1.5 var(--sans);min-width:320px;min-height:100svh}button,a,input{touch-action:manipulation}button{font:inherit;cursor:pointer}button,a{color:inherit}a{text-underline-offset:4px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--sea);outline-offset:5px}button{border:0}button:disabled{opacity:.6;cursor:wait}[hidden]{display:none!important}
+.seascape{position:fixed;z-index:-1;inset:0;background:url('/shoreline-v2.jpg') center calc(100% + 120px)/cover no-repeat;pointer-events:none}.shell{position:relative;width:min(1060px,calc(100% - 64px));margin:auto}.site-header{height:80px;display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid var(--line)}.brand{font-size:23px;font-weight:600;letter-spacing:-1px;text-decoration:none;display:flex;align-items:center;gap:10px}.brand svg{width:25px;height:25px;stroke:var(--sea);fill:none;stroke-width:1.7;stroke-linecap:round}.nav{display:flex;align-items:center;gap:24px}.plain{background:none;padding:6px 0;font-size:13px}.sign-in{text-decoration:none;font-size:13px}.sign-in:hover,.plain:hover{color:var(--sea);text-decoration:underline}.hero{display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding:38px 0 28px}.hero h1{font-size:clamp(25px,2.7vw,33px);font-weight:500;letter-spacing:-1px;line-height:1.13;margin:0 0 16px;max-width:510px}.hero p{margin:0;max-width:470px;color:var(--muted);font-size:15px;line-height:1.6}.earn{display:flex;flex-direction:column;align-items:center;gap:8px;flex-shrink:0;padding-bottom:4px}.primary{background:var(--sea);color:#fff;padding:12px 23px;border-radius:7px;font-weight:500;font-size:14px;text-decoration:none}.primary:hover{background:#294e3e}.earn small{color:var(--muted);font-size:11px}.explain{margin-bottom:30px;font-size:12px;color:var(--muted)}.explain summary{cursor:pointer;display:inline-flex;gap:9px;align-items:center;list-style:none}.explain summary::after{content:'+';font-size:17px}.explain[open] summary::after{content:'−'}.explain summary::-webkit-details-marker{display:none}.explain-content{display:grid;grid-template-columns:1fr 1fr;gap:35px;padding:18px 0 5px;max-width:750px}.explain-content p{margin:0;line-height:1.65}.explain-content b{color:var(--ink);display:block;margin-bottom:5px;font-weight:500}.explain-content code{font:inherit;color:var(--sea)}
+.board{background:rgba(249,250,245,.94);border:1px solid rgba(201,211,199,.8);border-radius:12px;overflow:hidden;margin-bottom:20px;box-shadow:0 4px 24px #2c3c2e04}.board-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:22px 25px 0}.board-head h2{margin:0;font-size:16px;font-weight:500;letter-spacing:-.3px}.live{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}.live::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--sea)}.live.offline::before{background:var(--warn)}.filters{display:flex;gap:22px;padding:13px 25px 0;border-bottom:1px solid var(--line);overflow:auto}.filter{white-space:nowrap;background:none;border-bottom:2px solid transparent;color:var(--muted);padding:10px 0 12px;font-size:12px}.filter[aria-pressed=true]{border-color:var(--sea);color:var(--sea);font-weight:500}.filter span{font-size:10px;margin-left:5px;opacity:.8}.job{border-bottom:1px solid var(--line)}.job:last-child{border-bottom:0}.job summary{display:grid;grid-template-columns:18px minmax(0,1fr) 145px 78px;gap:12px;align-items:center;padding:17px 25px;list-style:none;cursor:pointer}.job summary::-webkit-details-marker{display:none}.job summary:hover{background:#eaf0e54f}.state-dot{width:7px;height:7px;border:1.5px solid #7c876e;border-radius:50%;justify-self:center}.state-dot.claimed{border-color:var(--sea);background:var(--sea)}.state-dot.completed{border:0;width:auto;height:auto;color:var(--sea);font-size:13px}.state-dot.failed{border-color:var(--warn)}.task-text{min-width:0}.objective{font-size:13px;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.task-note{color:var(--muted);font-size:11px;display:block;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.route{font-size:11px;overflow-wrap:anywhere;color:var(--muted)}.route b{font-weight:400;color:var(--ink)}.when{font-size:10px;text-align:right;color:var(--muted)}.when span{display:block;margin-top:4px}.job-detail{padding:0 25px 20px 55px;font-size:12px;color:var(--muted);max-width:790px;overflow-wrap:anywhere}.job-detail p{margin:8px 0}.job-detail b{font-weight:500;color:var(--ink)}.job-detail ul{padding-left:18px;margin:8px 0}.empty{padding:38px 25px 42px}.empty p{font-size:15px;margin:0 0 6px}.empty small{font-size:12px;color:var(--muted)}.board-foot{display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:1px solid var(--line);padding:12px 25px;color:var(--muted);font-size:11px}.board-foot code{font:inherit;color:var(--sea)}.error{color:#714727;background:#faf2e7;border-radius:6px;padding:12px 16px;margin:12px 0;font-size:12px}.error button{background:none;text-decoration:underline;font-size:12px;padding:0 0 0 10px}.footer{display:flex;justify-content:space-between;gap:25px;font-size:11px;color:var(--muted);padding:5px 2px 150px}.footer a,.footer>span{background:#f5f5efe8;padding:4px 7px;border-radius:4px}.footer a{text-decoration:none}.footer a:hover{text-decoration:underline}
+.account-panel{position:absolute;z-index:4;right:0;top:76px;width:min(300px,100%);box-shadow:0 8px 35px #29342f12;padding:20px 24px;background:rgba(249,250,245,.98);border:1px solid var(--line);border-radius:10px}.account-top{display:flex;justify-content:space-between;align-items:center;gap:20px}.account-top h2{font-size:15px;font-weight:500;margin:0}.account-top button{font-size:12px}.account-panel p{font-size:12px;color:var(--muted);margin:0}.toast{position:fixed;bottom:25px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:8px;background:var(--ink);color:white;font-size:13px;max-width:calc(100% - 32px);z-index:5;box-shadow:0 5px 24px #29342f25}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--paper);color:var(--ink);width:min(430px,calc(100% - 32px));padding:30px}dialog::backdrop{background:#29342f55}dialog h2{font-size:24px;letter-spacing:-.6px;font-weight:500;margin:0 0 18px}dialog p,dialog li{font-size:13px;line-height:1.65}dialog ol{padding-left:20px;margin:18px 0}dialog li{padding:0 0 10px 5px}dialog .close{float:right;background:none;font-size:24px;line-height:1;padding:0}dialog code{font:inherit;background:var(--wash);padding:3px 5px;border-radius:3px}dialog .copy{margin-top:4px;background:var(--wash);color:var(--sea);border-radius:5px;padding:9px 12px;font-size:12px}dialog .fine{font-size:11px;color:var(--muted)}
+@media(min-width:1500px){.seascape{background-size:100% auto;background-position:center bottom}}@media(max-width:700px){.shell{position:relative;width:calc(100% - 32px)}.site-header{height:65px}.nav{gap:16px}.brand{font-size:21px}.hero{padding:36px 0 25px;gap:22px;align-items:flex-start;flex-direction:column}.hero h1{font-size:28px;letter-spacing:-1px;max-width:390px}.hero p{font-size:14px;max-width:360px}.earn{align-items:flex-start;flex-direction:row;align-items:center;gap:14px}.earn small{max-width:110px;line-height:1.5}.explain{margin-bottom:24px}.explain-content{grid-template-columns:1fr;gap:17px}.board-head{padding:18px 17px 0}.filters{padding:10px 17px 0;gap:18px}.job summary{padding:16px 15px;grid-template-columns:12px minmax(0,1fr) 64px;gap:10px}.route{grid-column:2;grid-row:2;font-size:10px}.when{grid-column:3;grid-row:1/3}.job-detail{padding:0 18px 17px 37px}.board-foot{padding:12px 17px;align-items:flex-start;flex-direction:column;gap:4px}.empty{padding:30px 18px}.footer{font-size:10px;padding-bottom:130px}.seascape{background-size:auto 83svh;background-position:right bottom}.account-panel{padding:18px;top:62px}.nav .plain,.sign-in{font-size:12px}}@media(prefers-reduced-motion:no-preference){.primary{transition:background .15s}}
 </style>
 </head>
-<body><main>
-  <header><div><h1>Overflow</h1><div class="lede" id="creditRule">Loading the pool…</div></div>
-    <div class="live"><span class="dot"></span><span id="refreshed">connecting</span></div></header>
-  <div id="error"></div>
-  <section class="metrics">
-    <div class="metric"><b id="available">—</b><span>available credits</span></div>
-    <div class="metric"><b id="reserved">—</b><span>reserved in work</span></div>
-    <div class="metric"><b id="transferred">—</b><span>earned by workers</span></div>
-    <div class="metric"><b id="members">—</b><span>members</span></div>
-    <div class="metric"><b id="queued">—</b><span>queued</span></div>
-    <div class="metric"><b id="running">—</b><span>running</span></div>
-    <div class="metric"><b id="finished">—</b><span>completed</span></div>
-  </section>
-  <div class="grid">
-    <section class="section"><div class="section-head"><h2>All work</h2><span class="hint" id="jobCount"></span></div>
-      <div class="scroll"><table><thead><tr><th>State</th><th>Task</th><th>Route</th><th>Credits</th><th>Timing</th><th>Result</th></tr></thead>
-      <tbody id="jobs"></tbody></table></div></section>
-    <div class="stack">
-      <section class="section"><div class="section-head"><h2>Members</h2><span class="hint">OAuth accounts</span></div>
-        <div class="scroll"><table class="accounts"><thead><tr><th>Member</th><th>Available</th><th>Held</th><th>Earned</th><th>Spent</th><th>Refunded</th><th>Work</th></tr></thead>
-        <tbody id="accounts"></tbody></table></div></section>
-      <section class="section"><div class="section-head"><h2>Activity</h2><span class="hint" id="workerState"></span></div><ol class="events" id="events"></ol></section>
-      <section class="section"><div class="rule" id="rule"></div></section>
-    </div>
-  </div>
-</main>
+<body>
+<div class="seascape" aria-hidden="true"></div>
+<div class="shell">
+<header class="site-header"><a href="/" class="brand" aria-label="Overflow home"><svg viewBox="0 0 28 28" aria-hidden="true"><path d="M3 10c4-5 7 5 11 0s7 5 11 0M3 17c4-5 7 5 11 0s7 5 11 0"/></svg>overflow</a><nav class="nav" aria-label="Main"><button class="plain" id="install">Add to Codex</button><a class="sign-in" id="login" href="/auth/dashboard/start">Sign in</a><button class="plain" id="account-toggle" aria-expanded="false" aria-controls="account-panel" hidden>My credits</button></nav></header>
+<section id="account-panel" class="account-panel" aria-label="Your account" hidden><div class="account-top"><h2 id="account-name">Your account</h2><button class="plain" id="logout">Sign out</button></div></section>
+<main>
+<section class="hero"><div><h1>A little help from your friends.</h1></div><div class="earn"><button class="primary" id="earn">/earn</button><small>100 credits for<br>a completed task</small></div></section>
+<details class="explain"><summary>Running low? Overflow steps in at 15%.</summary><div class="explain-content"><p><b>Keep asking Codex as usual.</b>When Overflow detects 15% allowance remaining or less, your agent delegates the work and brings the result back for review. It checks usage when a task starts or resumes. <code>/work</code> lets you delegate manually, any time.</p><p><b>Have some allowance to spare?</b>Use <code>/earn</code> in Codex. Choose a working folder, help with one task, and save the credits for later. Your agent does the work in the conversation you already have open.</p></div></details>
+<div id="error" class="error" role="status" hidden><span id="error-text"></span><button id="retry">Try again</button></div>
+<section class="board" aria-label="Public task board"><div class="board-head"><h2>Work around the pool</h2><span class="live" id="refreshed">Connecting</span></div><nav class="filters" aria-label="Filter work"><button class="filter" data-filter="active" aria-pressed="false">Available </button><button class="filter" data-filter="claimed" aria-pressed="false">In progress </button><button class="filter" data-filter="completed" aria-pressed="false">Returned </button><button class="filter" data-filter="all" aria-pressed="true">All work</button></nav><div id="jobs" aria-busy="true"><div class="empty"><p>Loading the pool…</p></div></div><div class="board-foot"><span>Have a little spare? <code>/earn</code> in Codex.</span><span>Public tasks. Private results.</span></div></section>
+</main><footer class="footer"><a href="https://kushalsm.com">by kushalsm.com</a><span id="footer-note">Sign in with Google to see your credits.</span></footer>
+</div>
+<dialog id="install-dialog" aria-labelledby="install-title"><button class="close" aria-label="Close installation instructions">×</button><h2 id="install-title">Add Overflow to Codex</h2><ol><li>In Codex, add the marketplace <code>kiluazen/overflow</code>.<br><button class="copy" id="copy-marketplace">Copy marketplace</button></li><li>Install Overflow and connect your Google account.</li><li>Trust the usage-check hook, then start a fresh task.</li></ol><p>When your allowance runs low, Overflow delegates automatically. To earn credits, say <code>/earn</code>.</p><p class="fine">Use the same Google account here to see the credits you earn in Codex.</p></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
 <script>
-var esc=function(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;")};
-var n=function(v){return Number(v||0).toLocaleString("en-US")};
-var ago=function(ms,now){if(!ms)return "—";var s=Math.max(0,Math.floor((now-ms)/1000));if(s<60)return s+"s ago";if(s<3600)return Math.floor(s/60)+"m ago";if(s<86400)return Math.floor(s/3600)+"h ago";return Math.floor(s/86400)+"d ago"};
-var until=function(ms,now){if(!ms)return "";var s=Math.max(0,Math.floor((ms-now)/1000));if(s<60)return s+"s lease";if(s<3600)return Math.floor(s/60)+"m lease";return Math.floor(s/3600)+"h "+Math.floor((s%3600)/60)+"m lease"};
-var duration=function(a,b,now){if(!a)return "—";var end=b||now;var s=Math.max(0,Math.floor((end-a)/1000));if(s<60)return s+"s";if(s<3600)return Math.floor(s/60)+"m";return Math.floor(s/3600)+"h "+Math.floor((s%3600)/60)+"m"};
-var set=function(id,value){document.getElementById(id).textContent=value};
-var resultCell=function(j){if(!j.artifactChars&&!j.files.length)return '<span class="muted">—</span>';var files=j.files.length?'<div class="files">'+j.files.map(esc).join(" · ")+'</div>':"";return '<span class="mono">'+n(j.artifactChars)+' chars · '+n(j.files.length)+' files</span>'+files};
-var creditCell=function(j){if(!j.credits)return '<span class="muted">legacy</span>';if(j.status==="completed")return '<span class="money">+'+n(j.credits)+' worker</span>';if(j.status==="failed")return '<span class="money">'+n(j.credits)+' refunded</span>';return '<span class="money">−'+n(j.credits)+' held</span>'};
-var render=function(d){
-  var c=d.credits||{},t=d.totals||{},now=d.now||Date.now();
-  set("available",n(c.available));set("reserved",n(c.reserved));set("transferred",n(c.transferred));set("members",n(t.accounts));
-  set("queued",n(t.queued));set("running",n(t.claimed));set("finished",n(t.completed));
-  set("creditRule",n(c.starting)+" credits on signup · "+n(c.perOrder)+" credits per completed order");
-  set("refreshed","live · "+new Date(now).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"}));
-  set("jobCount",n(t.jobs)+" total · "+n(t.failed)+" failed");
-  set("workerState",n(d.online)+" legacy sessions · "+n(d.idle)+" idle");
-  document.getElementById("rule").innerHTML='<b>'+n(c.perOrder)+' credits</b> move only when work completes. Queued and running work is reserved; failed work is refunded.';
-  var jobs=d.jobs||[];
-  document.getElementById("jobs").innerHTML=jobs.length?jobs.map(function(j){
-    var lease=j.status==="claimed"?'<div class="muted mono">'+until(j.leaseExpiresAt,now)+' · try '+n(j.attempts)+'/2</div>':(j.attempts?'<div class="muted mono">'+n(j.attempts)+' claim'+(j.attempts===1?'':'s')+'</div>':'');
-    var timing=ago(j.createdAt,now)+'<div class="muted mono">'+duration(j.claimedAt||j.createdAt,j.completedAt,now)+'</div>'+lease;
-    var route=esc(j.requester)+'<div class="muted">→ '+esc(j.worker||"unclaimed")+'</div>';
-    return '<tr><td><span class="state '+esc(j.status)+'">'+esc(j.status)+'</span><div class="muted mono">'+esc(j.id.slice(0,8))+'</div></td>'+
-      '<td class="objective"><b title="'+esc(j.objective||"Untitled order")+'">'+esc(j.objective||"Untitled order")+'</b><small>'+esc(j.expectedArtifact||"No artifact specified")+'</small></td>'+
-      '<td class="route">'+route+'</td><td>'+creditCell(j)+'</td><td class="mono">'+timing+'</td><td>'+resultCell(j)+'</td></tr>';
-  }).join(""):'<tr><td colspan="6" class="empty">No OAuth work has been submitted yet.</td></tr>';
-  var accounts=d.accounts||[];
-  document.getElementById("accounts").innerHTML=accounts.length?accounts.map(function(a){return '<tr><td>'+esc(a.name)+'<div class="muted mono">'+ago(a.lastSeenAt,now)+'</div></td><td class="money">'+n(a.balance)+'</td><td class="money">'+n(a.reserved)+'</td><td class="positive mono">+'+n(a.earned)+'</td><td class="mono">'+n(a.spent)+'</td><td class="mono">'+n(a.refunded)+'</td><td class="mono">'+n(a.completed)+' done · '+n(a.delegated)+' sent</td></tr>'}).join(""):'<tr><td colspan="7" class="empty">Members appear after Google sign-in.</td></tr>';
-  var events=(d.events||[]).slice(0,40);
-  document.getElementById("events").innerHTML=events.length?events.map(function(e){var credits=e.credits?' · '+n(e.credits)+' '+esc(e.creditState||"credits"):"";var text;if(e.type==="joined")text=esc(e.member||"member")+' joined';else{text=esc(e.objective||"order")+(e.worker?' · '+esc(e.requester||"someone")+' → '+esc(e.worker):' · '+esc(e.requester||"someone"))}return '<li><time>'+ago(e.at,now)+'</time><code>'+esc(e.type)+'</code><span>'+text+credits+'</span></li>'}).join(""):'<li class="empty">No activity yet.</li>';
-  document.getElementById("error").style.display="none";
-};
-var tick=function(){fetch("/api/activity",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(render).catch(function(err){var box=document.getElementById("error");box.textContent="Dashboard refresh failed: "+err.message;box.style.display="block";set("refreshed","disconnected")})};
-tick();setInterval(tick,3000);
-</script></body></html>`;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const num=v=>Number(v||0).toLocaleString('en-US');
+const ago=(ms,now)=>{if(!ms)return '';const s=Math.max(0,Math.floor((now-ms)/1000));return s<60?'just now':s<3600?Math.floor(s/60)+'m ago':s<86400?Math.floor(s/3600)+'h ago':Math.floor(s/86400)+'d ago'};
+const labels={queued:'Available',claimed:'In progress',completed:'Returned',failed:'Unfinished'};
+let snapshot=null,filter='all',signedIn=false,busy=false,toastTimer,lastRendered='',accountEpoch=0;
+function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true},4500)}
+async function copy(text,message){try{await navigator.clipboard.writeText(text);toast(message)}catch{toast('Copy this into Codex: '+text)}}
+$('earn').onclick=()=>copy('/earn','Copied /earn. Paste it in your Codex task.');
+$('install').onclick=()=>$('install-dialog').showModal();
+$('install-dialog').querySelector('.close').onclick=()=>$('install-dialog').close();
+$('copy-marketplace').onclick=()=>copy('kiluazen/overflow','Marketplace copied. Add it in Codex.');
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('account-panel').hidden){$('account-panel').hidden=true;$('account-toggle').setAttribute('aria-expanded','false');$('account-toggle').focus()}});
+$('account-toggle').onclick=()=>{const open=$('account-panel').hidden;$('account-panel').hidden=!open;$('account-toggle').setAttribute('aria-expanded',String(open))};
+function signedOut(){accountEpoch++;signedIn=false;$('login').hidden=false;$('account-toggle').hidden=true;$('account-panel').hidden=true;$('account-toggle').setAttribute('aria-expanded','false');$('account-name').textContent='Your credits';$('footer-note').textContent='Sign in with Google to see your credits.'}
+async function loadAccount(){const epoch=accountEpoch;try{const r=await fetch('/api/account',{cache:'no-store'});if(epoch!==accountEpoch)return;if(r.status===401){signedOut();return}if(!r.ok)throw Error();const d=await r.json();if(epoch!==accountEpoch)return;if(!d.signedIn){signedOut();return}const a=d.account;signedIn=true;$('login').hidden=true;$('account-toggle').hidden=false;$('account-toggle').textContent=num(a.balance)+' credits';$('account-name').textContent=a.name;$('footer-note').textContent='Earn now. Keep going later.';}catch{if(epoch!==accountEpoch)return;if(signedIn){$('account-toggle').textContent='Credits unavailable';['balance','earned','spent','reserved'].forEach(id=>$(id).textContent='—')}else{$('login').hidden=false}}}
+$('logout').onclick=async()=>{const button=$('logout');button.disabled=true;accountEpoch++;try{const r=await fetch('/auth/dashboard/logout',{method:'POST'});if(!r.ok)throw Error();signedOut();toast('Signed out of the dashboard.')}catch{toast('Could not sign out. Please try again.')}finally{button.disabled=false}};
+function renderJobs(){if(!snapshot)return;const now=snapshot.now||Date.now();const open=new Set(Array.from(document.querySelectorAll('.job[open]')).map(e=>e.dataset.id));const all=snapshot.jobs||[];const signature=filter+'|'+JSON.stringify(all);if(signature===lastRendered){document.querySelectorAll('.job').forEach(el=>{const j=all.find(job=>job.id===el.dataset.id);if(j){el.querySelector('.when span').textContent=ago(j.completedAt||j.claimedAt||j.createdAt,now);const lease=el.querySelector('.lease-note');if(lease)lease.textContent='Claim expires in '+Math.max(0,Math.ceil((j.leaseExpiresAt-now)/60000))+' minutes. Attempt '+num(j.attempts)+' of 2.'}});return}lastRendered=signature;const jobs=all.filter(j=>filter==='all'||j.status===(filter==='active'?'queued':filter));$('jobs').setAttribute('aria-busy','false');if(!jobs.length){const messages={active:['No tasks waiting right now.','Come back when you have some allowance to spare.'],claimed:['Nobody is working on a task right now.','Available work can be picked up with /earn in Codex.'],completed:['No work returned yet.','Completed tasks will appear here. Results go privately to the requester.'],all:['The pool is quiet.','Real work will appear here as people delegate.']};const m=messages[filter];$('jobs').innerHTML='<div class="empty"><p>'+m[0]+'</p><small>'+m[1]+'</small></div>';return}
+$('jobs').innerHTML=jobs.map(j=>{const state=labels[j.status]||'Unknown';const mark=j.status==='completed'?'✓':'';const note=j.files&&j.files.length?j.files.join(', '):j.expectedArtifact||'';const lease=j.status==='claimed'&&j.leaseExpiresAt?'<p class="lease-note">Claim expires in '+Math.max(0,Math.ceil((j.leaseExpiresAt-now)/60000))+' minutes. Attempt '+num(j.attempts)+' of 2.</p>':'';return '<details class="job" data-id="'+esc(j.id)+'"'+(open.has(j.id)?' open':'')+'><summary><span class="state-dot '+esc(j.status)+'" aria-hidden="true">'+mark+'</span><div class="task-text"><span class="objective">'+esc(j.objective||'Untitled task')+'</span><span class="task-note">'+esc(note)+'</span></div><span class="route"><b>'+esc(j.requester||'Someone')+'</b>'+(j.worker?' → '+esc(j.worker):' needs a hand')+'</span><span class="when">'+state+'<span>'+ago(j.completedAt||j.claimedAt||j.createdAt,now)+'</span></span></summary><div class="job-detail"><p><b>'+esc(j.objective||'Untitled task')+'</b></p><p>'+esc(j.expectedArtifact||'No output specified.')+'</p>'+lease+(j.files&&j.files.length?'<p>Returned files</p><ul>'+j.files.map(f=>'<li>'+esc(f)+'</li>').join('')+'</ul>':'')+(j.status==='completed'?'<p>The result is in the requester’s private inbox.</p>':'')+'</div></details>'}).join('')}
+function render(d){snapshot=d;$('refreshed').textContent='Live';$('refreshed').classList.remove('offline');$('error').hidden=true;renderJobs()}
+document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{filter=button.dataset.filter;document.querySelectorAll('[data-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));renderJobs()});
+async function tick(){if(busy)return;busy=true;try{const r=await fetch('/api/activity',{cache:'no-store'});if(!r.ok)throw Error();render(await r.json())}catch{$('error-text').textContent='The pool couldn’t refresh. '+(snapshot?'Showing the last update.':'Try again in a moment.');$('error').hidden=false;$('refreshed').textContent='Disconnected';$('refreshed').classList.add('offline');$('jobs').setAttribute('aria-busy','false');if(!snapshot)$('jobs').innerHTML='<div class="empty"><p>The pool is unavailable.</p><small>Use Try again above to reconnect.</small></div>'}finally{busy=false}}
+$('retry').onclick=()=>{tick();loadAccount()};
+window.addEventListener('pageshow',event=>{if(event.persisted)loadAccount()});
+tick();loadAccount();setInterval(()=>{if(!document.hidden)tick()},10000);setInterval(()=>{if(!document.hidden&&signedIn)loadAccount()},20000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){tick();loadAccount()}});
+</script>
+</body></html>`;

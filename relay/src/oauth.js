@@ -1,3 +1,5 @@
+import { dashboardLoginMatches, finishDashboardLogin } from "./dashboard-auth.js";
+
 const CONSENT_TTL_SECONDS = 10 * 60;
 const BASE = "https://overflow.kushalsm.com";
 const POOL = "global";
@@ -25,7 +27,7 @@ function consentHtml(nonce, clientName) {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Connect Overflow</title><style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#07100b;color:#d7ffe2;font:15px ui-monospace,SFMono-Regular,Menlo,monospace;padding:24px}.card{width:min(420px,100%);padding:32px;border:1px solid #254c32;border-radius:18px;background:#0c1711}h1{font-size:27px;margin:0 0 10px}p{color:#91b99c;line-height:1.55;margin:0 0 24px}.button{display:flex;justify-content:center;align-items:center;gap:10px;width:100%;padding:13px 16px;border-radius:10px;background:#c8ffd6;color:#07100b;text-decoration:none;font-weight:700}.note{font-size:12px;margin:18px 0 0;color:#668872}</style></head>
+:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f5ef url(/shoreline-v2.jpg) center bottom/cover no-repeat;color:#29342f;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px}.card{width:min(420px,100%);padding:32px;border:1px solid #d5dbd1;border-radius:12px;background:#f5f5eff5}h1{font-size:27px;margin:0 0 10px}p{color:#606c63;line-height:1.55;margin:0 0 24px}.button{display:flex;justify-content:center;align-items:center;gap:10px;width:100%;padding:13px 16px;border-radius:10px;background:#376451;color:#fff;text-decoration:none;font-weight:700}.note{font-size:12px;margin:18px 0 0;color:#606c63}</style></head>
 <body><main class="card"><h1>Connect Overflow</h1><p><b>${client}</b> wants to identify the work you delegate and the work you complete.</p><a class="button" href="/auth/google/start?nonce=${encodeURIComponent(nonce)}">Continue with Google</a><p class="note">Overflow receives your name, email address, and Google account identifier. It never receives your Google password.</p></main></body></html>`;
 }
 
@@ -104,6 +106,9 @@ export async function handleGoogleCallback(request, env) {
   await env.OAUTH_KV.delete(`google:${state}`);
   const parsed = await loadConsent(env, nonce);
   if (!parsed) return errorHtml("This Overflow authorization expired. Return to Codex and connect again.");
+  if (parsed._dashboard && !dashboardLoginMatches(request, parsed)) {
+    return errorHtml("Open Overflow and sign in again in this browser.");
+  }
 
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -130,7 +135,7 @@ export async function handleGoogleCallback(request, env) {
   const email = String(claims.email).trim().toLowerCase();
   const displayName = String(claims.name || email.split("@")[0]).trim();
   const userId = `google-${claims.sub}`;
-  const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
+  const authorization = parsed._dashboard ? null : await env.OAUTH_PROVIDER.completeAuthorization({
     request: parsed,
     userId,
     scope: parsed.scope,
@@ -152,7 +157,8 @@ export async function handleGoogleCallback(request, env) {
     // Authorization already succeeded. The first MCP call also initializes the
     // account, so a transient pool failure must not strand the OAuth redirect.
   }
-  return Response.redirect(redirectTo, 302);
+  if (parsed._dashboard) return finishDashboardLogin(env, { userId, email, displayName });
+  return Response.redirect(authorization.redirectTo, 302);
 }
 
 export function handleProtectedResource(request) {
