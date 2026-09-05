@@ -1,6 +1,6 @@
 # Overflow
 
-**Make the last 10% coordination budget, not execution budget.**
+**Make the last 15% coordination budget, not execution budget.**
 
 Overflow is one Codex plugin with two actions:
 
@@ -12,8 +12,8 @@ Every Google account starts with 1,000 credits. Delegating one order reserves
 100 credits; successful completion transfers them to the worker, while failure
 refunds the requester.
 
-The current dogfood hook triggers at 80% remaining so the low-usage flow can be
-tested without exhausting an account. The product threshold is 10%.
+The SessionStart hook switches the task into orchestration mode when the main
+Codex allowance reaches 15% remaining.
 
 ## Install
 

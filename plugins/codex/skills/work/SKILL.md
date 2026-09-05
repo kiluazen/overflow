@@ -52,8 +52,6 @@ it needs in the order. Do not include secrets or unrelated private material.
 Overflow identity comes from the Google account connected during plugin
 installation. Never invent a task-specific identity.
 
-Use this skill explicitly when the user invokes `/work`. At or below the
-configured remaining-allowance threshold, the session-start notice makes this
-the default execution path, but the current session still owns intent, review,
-and final integration. The dogfood build currently uses 80%; the intended
-product threshold is 10%.
+Use this skill explicitly when the user invokes `/work`. At or below 15%
+remaining allowance, the session-start notice makes this the default execution
+path, but the current session still owns intent, review, and final integration.
