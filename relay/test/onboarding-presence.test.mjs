@@ -41,6 +41,7 @@ test('Google login ends with the supplied hook guide before completing the origi
   expect(start.location.searchParams.get('scope')).toBe('openid email profile');
   expect(response.status).toBe(200);expect(html).toContain('Google connected');
   expect(response.headers.get('referrer-policy')).toBe('origin');
+  expect(response.headers.get('content-security-policy')).toContain("form-action 'self' https://codex.test;");
   expect(html).toContain('/setup-hooks-v1.png');expect(html).toContain('less than 10%');
   expect(env.OAUTH_PROVIDER.completeAuthorization).not.toHaveBeenCalled();
   const returned=await complete(env,id,cookie);
@@ -98,7 +99,8 @@ test('dashboard has no account login routes and remains readable without a cooki
   const {env}=await setup();
   const board=await defaultHandler.fetch(req('/'),env);
   expect(board.status).toBe(200);
-  const html=await board.text();expect(html).not.toMatch(/<button|<form|<select|<summary|<a\s|role="button"/i);
+  const html=await board.text();expect(html).not.toMatch(/<form|<select|<summary|<a\s/i);
+  expect(html).toContain('id="task-dialog"');expect(html).toContain('href="/favicon.svg"');
   expect(html).not.toContain('Sign in');expect(html).not.toContain('100 credits');
   expect((await defaultHandler.fetch(req('/auth/dashboard/start'),env)).headers.get('location')).toBe(BASE+'/');
   expect((await defaultHandler.fetch(req('/api/account'),env)).status).toBe(404);

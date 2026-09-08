@@ -171,11 +171,15 @@ export async function handleGoogleCallback(request, env) {
     request: parsed, identity: { userId, email, displayName, picture },
     browserHash: await tokenHash(setupSecret), expiresAt: Date.now() + CONSENT_TTL_SECONDS * 1000,
   }), { expirationTtl: CONSENT_TTL_SECONDS });
+  // The provider already validated this redirect against the registered client.
+  // Browsers also apply form-action to the eventual 303 callback navigation.
+  const redirect = new URL(parsed.redirectUri);
+  const callbackSource = redirect.origin === "null" ? redirect.protocol : redirect.origin;
   const headers = new Headers({
     // HTML form POSTs under no-referrer send Origin: null. Send only the
     // origin (never the Google callback query) so same-origin validation works.
     "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "origin",
-    "content-security-policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "content-security-policy": `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self' ${callbackSource}; frame-ancestors 'none'; base-uri 'none'`,
   });
   headers.append("set-cookie", browserCookie(`__Host-overflow-setup-${id}`, setupSecret, CONSENT_TTL_SECONDS));
   headers.append("set-cookie", browserCookie(`__Host-overflow-google-${state}`, "", 0));
@@ -207,7 +211,7 @@ export async function handleComplete(request, env) {
   await env.OAUTH_KV.delete(`setup:${id}`);
   try {
     const pool = env.POOL.get(env.POOL.idFromName(POOL));
-    await pool.fetch("https://overflow.internal/rpc/account-init", {
+    const initialized = await pool.fetch("https://overflow.internal/rpc/account-init", {
       method: "POST",
       headers: {
         "x-overflow-user-id": userId,
@@ -216,6 +220,8 @@ export async function handleComplete(request, env) {
         "x-overflow-picture": picture,
       },
     });
+    if (!initialized.ok) throw new Error(`account init failed: ${initialized.status}`);
+    await env.OAUTH_KV.put(`identity:${userId}`, JSON.stringify({ userId, email, displayName, picture, updatedAt: Date.now() }));
   } catch {
     // Authorization already succeeded. The first MCP call also initializes the
     // account, so a transient pool failure must not strand the OAuth redirect.
