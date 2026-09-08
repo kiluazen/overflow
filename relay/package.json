@@ -3,9 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:ui": "node scripts/build-ui.mjs",
+    "predev": "npm run build:ui",
     "dev": "wrangler dev",
+    "predeploy": "npm run build:ui",
     "deploy": "wrangler deploy",
+    "precheck": "npm run build:ui",
     "check": "wrangler deploy --dry-run",
+    "pretest": "npm run build:ui",
     "test": "vitest run"
   },
   "dependencies": {
@@ -16,6 +21,9 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "vite": "^8.2.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.118.0"
   }

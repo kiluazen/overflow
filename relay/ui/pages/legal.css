@@ -1,0 +1,10 @@
+.legal-page { max-width: 720px; padding-top: 48px; }
+.legal-page h1 { font-size: clamp(34px, 7vw, 48px); font-weight: 500; line-height: 1.1; letter-spacing: -1.5px; margin: 0 0 12px; }
+.legal-page .legal-date { font-size: 13px; color: var(--muted); margin: 0 0 32px; }
+.legal-page .intro { font-size: 20px; line-height: 1.5; }
+.legal-page h2 { font-size: 20px; font-weight: 600; letter-spacing: -.3px; margin: 36px 0 10px; }
+.legal-page p, .legal-page li { font-size: 16px; line-height: 1.7; }
+.legal-page li { margin-bottom: 12px; }
+.legal-page ul { padding-left: 22px; }
+.legal-page a { overflow-wrap: anywhere; }
+@media (max-width: 700px) { .legal-page { padding-top: 32px; } }

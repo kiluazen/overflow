@@ -153,6 +153,13 @@ npm run check
 npm run deploy
 ```
 
+The website lives in `relay/ui/`. Dashboard, privacy, and terms use the same
+React `SiteLayout`, `SiteHeader`, and `SiteFooter` and shared `site.css` tokens.
+Vite builds the board script and prerenders the pages into the Worker before
+`dev`, `test`, `check`, and `deploy`; React only runs at build time. Edit the
+components or page content, then run `npm run build:ui` to refresh an active
+Wrangler development session. Generated pages in `src/generated/` are ignored.
+
 The production Worker requires `GOOGLE_CLIENT_ID` and
 `GOOGLE_CLIENT_SECRET`. The Google OAuth client must allow exactly
 `https://overflow.kushalsm.com/auth/google/callback`.
@@ -168,6 +175,10 @@ relay/src/mcp.js                      pool tools
 relay/src/oauth.js                    OAuth and Google sign-in
 relay/src/index.js                    durable queue, credits, and presence
 relay/src/input-attachments.js        private requester input files
+relay/ui/components/                 shared React site layout, header, footer
+relay/ui/pages/                      board and legal pages
+relay/ui/board-client.js              live board data and task dialog
+relay/scripts/build-ui.mjs            Vite build and static page rendering
 relay/test/                           Workers-runtime queue tests
 test-support/                         marketplace install smoke test
 ```

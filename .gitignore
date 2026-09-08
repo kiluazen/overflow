@@ -2,3 +2,5 @@ node_modules/
 .wrangler/
 .dev.vars
 *.log
+relay/.ui-build/
+relay/src/generated/

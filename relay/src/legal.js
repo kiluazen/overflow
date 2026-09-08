@@ -1,59 +1,4 @@
-const updated = "8 September 2026";
-const contact = '<a href="mailto:kushalsm@autark.sh">kushalsm@autark.sh</a>';
-
-const privacy = `
-<p class="intro">Overflow connects people who want help with a task with people who can do it. This policy explains what moves through that exchange.</p>
-<h2>Who operates Overflow</h2>
-<p>Overflow is operated by Kushal. For privacy questions, access or deletion requests, or security reports, contact ${contact}.</p>
-<h2>Information we process</h2>
-<ul><li><strong>Account information:</strong> your Google account identifier, verified email address, display name, and profile photo; Overflow authorization records; and your credit balance and transactions.</li>
-<li><strong>Tasks and files:</strong> the brief, context, acceptance criteria, input files, outputs, filenames, file sizes and checksums, task status, and the people and times associated with the work.</li>
-<li><strong>Activity:</strong> recent plugin activity and, when your browser is connected, whether you are viewing the board. Our hosting provider also processes network request information, such as IP addresses and request metadata, to deliver and protect the service.</li>
-<li><strong>Support:</strong> information you include when you contact us.</li></ul>
-<p>Google sign-in requests basic profile and email information. It does not request access to your Gmail or Google Drive. Overflow does not receive your Google password. The plugin sends the task and files prepared for delegation; the rest of your conversation and computer files are not automatically copied to the relay.</p>
-<h2>What other people can see</h2>
-<p><strong>The board is public, including to visitors who are not signed in.</strong> It displays your name, profile photo, credit balance, recent activity, task objective, expected output, requester and worker names, task status and timing, credit cost, input count, returned filenames, and result length. Keep confidential information out of task summaries and filenames.</p>
-<p>Your email, full task context, acceptance criteria, file contents, and full result text are not included in the public board response. A person who claims a task receives its brief and can download its inputs. The requester receives the returned result and files. Expiring file links grant access to whoever holds them while valid, so do not share those links publicly.</p>
-<p>Workers perform tasks on their own computers using their chosen AI tools. Your task data may therefore be processed by that worker and their AI or tool providers, under those providers' terms and privacy settings. The pool is shared; it is not restricted to a private group of friends. Only send material you are authorized to share in this way.</p>
-<h2>How we use information</h2>
-<p>We use it to authenticate accounts, route tasks, transfer files, recover results, maintain credits and activity, provide support, and investigate errors or abuse. Overflow does not sell personal information, use it for targeted advertising, or use task content to train its own AI models.</p>
-<h2>Service providers</h2>
-<p>Cloudflare hosts the relay, account and task records, and file storage. Google provides sign-in, profile images, and the fonts loaded by the dashboard. Loading those resources sends normal network request information to Google. Claude, Codex, and any tools a participant uses process information according to their own policies. Providers and participants may process data in countries outside your own. We may disclose information when required by law or necessary to address abuse, security incidents, or protect legal rights.</p>
-<p>Provider policies: <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a>, <a href="https://policies.google.com/privacy">Google</a>, <a href="https://www.anthropic.com/legal/privacy">Anthropic</a>, and <a href="https://openai.com/policies/privacy-policy/">OpenAI</a>.</p>
-<h2>Cookies and local activity</h2>
-<p>Overflow uses short-lived cookies for sign-in security and a browser-presence cookie lasting up to seven days to attribute board visits to your account. Clearing site cookies removes that browser association until you connect again. The public board can be read without signing in. The current website has no advertising cookies or third-party analytics scripts.</p>
-<p>In supported Codex hosts, the plugin reads native allowance information inside the host to decide whether to delegate. The presence request does not send your allowance or conversation text. Claude Code uses manual work and earn flows and has no Overflow usage monitor.</p>
-<h2>Retention and deletion</h2>
-<p>Unattached input uploads expire after 24 hours. Attached inputs remain while a task is open and are scheduled for deletion 30 days after completion or failure. Expiring download links do not by themselves delete the underlying files.</p>
-<p>Account records, credit history, task records, returned text, and output files currently have no automatic deletion deadline. We retain them for result recovery and operation of the service until removed through an administrative or deletion request process. Contact ${contact} to request access, correction, or deletion. We may need to verify your account and retain limited records for security, disputes, or legal obligations. Copies already downloaded by another participant or processed by another provider cannot be recalled by Overflow.</p>
-<p>You can disconnect Overflow in your AI host and revoke Google access in your Google account. Disconnecting stops future authorized use; it does not automatically delete existing Overflow records. Depending on your location, you may have additional privacy rights, which you can raise using the same contact address.</p>
-<h2>Changes</h2><p>We will update this page when our practices change and revise the date above. Material changes will be called out on the website or communicated using your account contact information.</p>`;
-
-const terms = `
-<p class="intro">Overflow helps people exchange tasks and results. These terms cover the hosted service and the Overflow plugin.</p>
-<h2>Using Overflow</h2>
-<p>Overflow is operated by Kushal. By using the service, you agree to these terms and acknowledge the <a href="/privacy">Privacy Policy</a>. Contact ${contact} for support, disputes, security reports, or account requests.</p>
-<p>Use your own authorized accounts, follow your AI provider's terms and usage limits, and take responsibility for tasks you send and actions you run. Overflow exchanges completed work; it does not transfer provider subscriptions or grant access to someone else's AI account.</p>
-<h2>How the exchange works</h2>
-<p>A requester supplies a task and any required inputs. Another participant chooses to claim it and works in their visible AI session. Submitting an order does not guarantee that anyone will claim it, finish it by a deadline, or produce a correct result. Review results before relying on them.</p>
-<p>The current trial starts each new Google account with 10,000 credits. An order reserves 100 credits, which transfer to the worker on successful completion or return to the requester on failure. Credits are service accounting units with no cash value, purchase, redemption, or cash-out facility. They are not wages or a promise of payment. We may change future trial allocations and pricing; changes will be disclosed before they apply to new orders.</p>
-<h2>Your content and other people's work</h2>
-<p>You retain rights you hold in material you provide. You give Overflow and the participants handling your task permission to store, process, transmit, and use that material as needed to complete the exchange and deliver the result. Workers permit requesters to use delivered work for the stated task, to the extent the worker has those rights. Third-party licenses and rights still apply; AI-generated results may not be exclusive or eligible for copyright.</p>
-<p>Only provide content you are allowed to share. Do not send credentials, malicious files, unlawful material, or instructions to access another person's systems without permission. Do not exploit the credit ledger, misrepresent completion, or interfere with other participants or the service.</p>
-<h2>Public information and privacy</h2>
-<p>Names, photos, credits, activity, task summaries, status, and returned filenames appear on a public board. A worker receives the task and its inputs on their computer and may use an AI provider to complete it. Read the <a href="/privacy">Privacy Policy</a> before submitting work. Overflow does not provide a private or confidential workspace between friends.</p>
-<h2>Plugin license</h2>
-<p>The Overflow plugin is proprietary software, copyright 2026 Kushal. You may inspect its published source and install, copy, and run the unmodified plugin for personal or business use with the Overflow service. Authorized plugin marketplaces may copy and distribute the unmodified plugin for installation and review, retaining its license notice. No permission is granted to relicense it, distribute modified versions, or operate a competing hosted service using Overflow code. Rights granted by applicable law or a separate written agreement remain unaffected. Third-party components retain their own licenses.</p>
-<h2>Availability and responsibility</h2>
-<p>Overflow is an early service provided as available, without a promise of uninterrupted access, result accuracy, fitness for a particular purpose, or permanent storage. Keep copies of important files. To the extent permitted by applicable law, the service is provided without warranties and we are not responsible for indirect or consequential losses caused by unavailable service, other participants, or reliance on results. Nothing here excludes rights or liabilities that cannot lawfully be excluded.</p>
-<p>We may restrict accounts or remove tasks to address abuse, security issues, or legal requirements. You can stop using the service and request deletion at ${contact}. Other providers' terms continue to govern their products; Overflow is not endorsed by Anthropic, OpenAI, or Google.</p>
-<h2>Changes</h2><p>We may revise these terms as the service develops. Updated terms will be published here with a new date; material changes will be called out on the website or communicated using your account contact information before they apply.</p>`;
-
-function page(title, body, path) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Overflow</title><meta name="description" content="${title} for Overflow, the shared task exchange."><link rel="canonical" href="https://overflow.kushalsm.com${path}"><link rel="icon" href="/favicon.svg"><style>
-  :root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#29342f;background:#f7f8f2}*{box-sizing:border-box}body{margin:0}main,header,footer{width:min(720px,calc(100% - 40px));margin:auto}header{padding:32px 0;border-bottom:1px solid #dce1d5}a{color:#376451;text-underline-offset:3px}header a{font-size:20px;letter-spacing:-.7px;text-decoration:none;font-weight:600}main{padding:48px 0}h1{font-weight:500;letter-spacing:-1.5px;font-size:clamp(34px,7vw,48px);line-height:1.1;margin:0 0 12px}.date{font-size:13px;color:#657060;margin:0 0 32px}.intro{font-size:20px;line-height:1.5}h2{font-size:20px;font-weight:600;letter-spacing:-.3px;margin:36px 0 10px}p,li{font-size:16px;line-height:1.7}li{margin-bottom:12px}ul{padding-left:22px}footer{display:flex;flex-wrap:wrap;gap:22px;padding:24px 0 40px;border-top:1px solid #dce1d5;font-size:14px}a:focus-visible{outline:2px solid #376451;outline-offset:4px} @media(max-width:480px){main{padding:32px 0}header{padding:24px 0}}
-  </style></head><body><header><a href="/">overflow</a></header><main><h1>${title}</h1><p class="date">Last updated ${updated}</p>${body}</main><footer><a href="/">Overflow</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="mailto:kushalsm@autark.sh">Contact</a></footer></body></html>`;
-}
+import { SITE_PAGES } from "./generated/site-pages.js";
 
 export function legalResponse(request) {
   const path = new URL(request.url).pathname.replace(/\/$/, "");
@@ -61,11 +6,11 @@ export function legalResponse(request) {
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
   }
-  return new Response(request.method === "HEAD" ? null : page(path === "/privacy" ? "Privacy Policy" : "Terms of Service", path === "/privacy" ? privacy : terms, path), {
+  return new Response(request.method === "HEAD" ? null : SITE_PAGES[path], {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "public, max-age=300",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
       "x-content-type-options": "nosniff",
       "referrer-policy": "no-referrer",
     },

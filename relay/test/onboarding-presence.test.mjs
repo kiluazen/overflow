@@ -59,6 +59,24 @@ test('legal pages are public without opening protected account routes',async()=>
   expect((await defaultHandler.fetch(req('/status'),{})).status).toBe(401);
 });
 
+test('public pages share the exact header, footer and base styles without adding scripts to legal pages',async()=>{
+  const {env}=await setup();
+  const pages=await Promise.all(['/','/privacy','/terms'].map(async path=>{
+    const response=await defaultHandler.fetch(req(path),env);
+    return {path,html:await response.text(),csp:response.headers.get('content-security-policy')};
+  }));
+  for(const pattern of [/<header\b[\s\S]*?<\/header>/,/<footer\b[\s\S]*?<\/footer>/,/<style data-site-styles=""[\s\S]*?<\/style>/]){
+    const fragments=pages.map(page=>page.html.match(pattern)?.[0]);
+    expect(fragments[0]).toBeTruthy();
+    expect(new Set(fragments).size).toBe(1);
+  }
+  for(const page of pages.slice(1)){
+    expect(page.html).not.toContain('<script');
+    expect(page.csp).toContain("default-src 'none'");
+    expect(page.csp).toContain('font-src https://fonts.gstatic.com');
+  }
+});
+
 test('Google login immediately completes the original OAuth handoff without a return-button click',async()=>{
   const {env,pool,values}=await setup();
   const {response,html,start}=await googleFinish(env);
@@ -136,7 +154,7 @@ test('dashboard has no account login routes and remains readable without a cooki
   const board=await defaultHandler.fetch(req('/'),env);
   expect(board.status).toBe(200);
   const html=await board.text();expect(html).not.toMatch(/<form|<select|<summary/i);
-  expect([...html.matchAll(/<a\s+href="([^"]+)"/g)].map(match=>match[1])).toEqual(['/privacy','/terms','mailto:kushalsm@autark.sh']);
+  expect([...html.matchAll(/<a\s+href="([^"]+)"/g)].map(match=>match[1])).toEqual(['/','/privacy','/terms','mailto:kushalsm@autark.sh']);
   expect(html).toContain('id="task-dialog"');expect(html).toContain('href="/favicon.svg"');
   expect(html).not.toContain('Sign in');expect(html).not.toContain('100 credits');
   expect((await defaultHandler.fetch(req('/auth/dashboard/start'),env)).headers.get('location')).toBe(BASE+'/');
