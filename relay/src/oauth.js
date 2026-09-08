@@ -31,17 +31,6 @@ function consentHtml(nonce, clientName) {
 <body><main class="card"><h1>Connect Overflow</h1><p><b>${client}</b> wants to identify the work you delegate and complete.</p><a class="button" href="/auth/google/start?nonce=${encodeURIComponent(nonce)}">Continue with Google</a><p class="note">Your name, photo, credits, and last active appear on the shared board. Your email stays private.</p></main></body></html>`;
 }
 
-function setupHtml(id, clientName = "") {
-  const claude = /claude/i.test(clientName);
-  const guide = claude
-    ? '<p>Return to Claude to delegate work or earn credits with Overflow. In Claude Code, use <b>/overflow:work</b> or <b>/overflow:earn</b>.</p>'
-    : '<p>Return to Codex, open <b>Overflow → Hooks</b>, and approve the usage hook. This lets Overflow check when you have less than 10% allowance left.</p><img src="/setup-hooks-v1.png" width="1636" height="920" alt="Overflow plugin settings: the Hooks section is below Earn and Work.">';
-  const returnLabel = claude ? "Return to Claude" : "Return to Codex";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finish connecting Overflow</title><style>
-  *{box-sizing:border-box}body{margin:0;padding:40px 20px;background:#f5f5ef;color:#29342f;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{max-width:640px;margin:0 auto}h1{font-size:30px;font-weight:500;letter-spacing:-1px;margin:0 0 12px}p{max-width:510px;margin:0 0 24px;color:#606c63}img{display:block;width:100%;height:auto;border-radius:12px;margin:24px 0}button{border:0;border-radius:8px;background:#376451;color:white;font:inherit;font-weight:500;padding:13px 22px;cursor:pointer}button:focus-visible{outline:3px solid #376451;outline-offset:4px}
-  </style></head><body><main class="card"><h1>Google connected</h1>${guide}<form method="post" action="/auth/complete"><input type="hidden" name="setup" value="${escapeHtml(id)}"><button type="submit">${returnLabel}</button></form></main></body></html>`;
-}
-
 export function profilePicture(value) {
   try {
     const url = new URL(value);
@@ -165,27 +154,18 @@ export async function handleGoogleCallback(request, env) {
   const displayName = String(claims.name || email.split("@")[0]).trim();
   const userId = `google-${claims.sub}`;
   const picture = profilePicture(claims.picture);
-  const id = crypto.randomUUID();
-  const setupSecret = crypto.randomUUID();
-  await env.OAUTH_KV.put(`setup:${id}`, JSON.stringify({
-    request: parsed, identity: { userId, email, displayName, picture },
-    browserHash: await tokenHash(setupSecret), expiresAt: Date.now() + CONSENT_TTL_SECONDS * 1000,
-  }), { expirationTtl: CONSENT_TTL_SECONDS });
-  // The provider already validated this redirect against the registered client.
-  // Browsers also apply form-action to the eventual 303 callback navigation.
-  const redirect = new URL(parsed.redirectUri);
-  const callbackSource = redirect.origin === "null" ? redirect.protocol : redirect.origin;
-  const headers = new Headers({
-    // HTML form POSTs under no-referrer send Origin: null. Send only the
-    // origin (never the Google callback query) so same-origin validation works.
-    "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "origin",
-    "content-security-policy": `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self' ${callbackSource}; frame-ancestors 'none'; base-uri 'none'`,
-  });
-  headers.append("set-cookie", browserCookie(`__Host-overflow-setup-${id}`, setupSecret, CONSENT_TTL_SECONDS));
-  headers.append("set-cookie", browserCookie(`__Host-overflow-google-${state}`, "", 0));
-  return new Response(setupHtml(id, parsed._client), { headers });
+  // Continue-with-Google already gave consent. Complete the original OAuth
+  // request now; an instructional page must not gate delivery of its code.
+  if (!await consumeOnce(env, userId, "oauth", await tokenHash(nonce), Date.now() + CONSENT_TTL_SECONDS * 1000)) {
+    return errorHtml("This connection was already used. Return to your application.");
+  }
+  const connected = await finishAuthorization(env, parsed, { userId, email, displayName, picture });
+  connected.headers.append("set-cookie", browserCookie(`__Host-overflow-google-${state}`, "", 0));
+  return connected;
 }
 
+// Keep accepting already-open return forms during the transition. New Google
+// callbacks bypass this page entirely and deliver the host callback directly.
 export async function handleComplete(request, env) {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
   if (request.headers.get("origin") !== new URL(request.url).origin) return errorHtml("Return to the connection page and try again.");
@@ -199,16 +179,22 @@ export async function handleComplete(request, env) {
   if (!secret || setup.expiresAt <= Date.now() || await tokenHash(secret) !== setup.browserHash) {
     return errorHtml("Finish connecting in the browser where you started.");
   }
-  const { userId, email, displayName, picture } = setup.identity;
+  const { userId } = setup.identity;
   if (!await consumeOnce(env, userId, "oauth", id, setup.expiresAt)) {
     return errorHtml("This connection was already used. Return to Codex.");
   }
+  const connected = await finishAuthorization(env, setup.request, setup.identity);
+  await env.OAUTH_KV.delete(`setup:${id}`);
+  connected.headers.append("set-cookie", browserCookie(`__Host-overflow-setup-${id}`, "", 0));
+  return connected;
+}
+
+async function finishAuthorization(env, parsed, { userId, email, displayName, picture }) {
   const authorization = await env.OAUTH_PROVIDER.completeAuthorization({
-    request: setup.request, userId, scope: setup.request.scope,
+    request: parsed, userId, scope: parsed.scope,
     props: { userId, email, displayName, picture },
     metadata: { signedInVia: "google", issuedAt: Date.now() }, revokeExistingGrants: false,
   });
-  await env.OAUTH_KV.delete(`setup:${id}`);
   try {
     const pool = env.POOL.get(env.POOL.idFromName(POOL));
     const initialized = await pool.fetch("https://overflow.internal/rpc/account-init", {
@@ -227,7 +213,6 @@ export async function handleComplete(request, env) {
     // account, so a transient pool failure must not strand the OAuth redirect.
   }
   const headers = new Headers({ location: authorization.redirectTo, "cache-control": "no-store", "referrer-policy": "no-referrer" });
-  headers.append("set-cookie", browserCookie(`__Host-overflow-setup-${id}`, "", 0));
   try { headers.append("set-cookie", await createPresenceCookie(env, userId)); } catch { /* Presence must not prevent connection. */ }
   return new Response(null, { status: 303, headers });
 }

@@ -21,9 +21,9 @@ local. Missing usage data leaves normal work available; `/work` still works.
 ## Install
 
 In Codex, add the marketplace `kiluazen/overflow`, then install Overflow.
-Connect Google once. The final connection page shows where to find
-**Overflow → Hooks**; return to Codex and approve the usage hook, then start
-a new task.
+Connect Google once. OAuth returns directly to the app after Google sign-in,
+without an Overflow return-button step. In Codex, open **Overflow → Hooks**
+and approve the usage hook, then start a new task.
 
 The hook uses the system shell to give the current agent instructions. The
 agent reads the host's native `get_usage_limits` tool. No Python, Node, separate

@@ -19,9 +19,10 @@ async function setup(){
 }
 function googleToken(overrides={}){return 'header.'+btoa(JSON.stringify({sub:'alice',email:'alice@example.com',name:'Alice',email_verified:true,aud:'test-client',iss:'https://accounts.google.com',exp:Math.floor(Date.now()/1000)+3600,picture:'https://lh3.googleusercontent.com/avatar',...overrides}))+'.sig'}
 function cookies(response){return response.headers.getSetCookie().filter(value=>!value.includes('Max-Age=0')).map(value=>value.split(';')[0]).join('; ')}
-async function googleStart(env,clientName='Codex'){
-  await env.OAUTH_KV.put('consent:nonce',JSON.stringify({_client:clientName,clientId:'codex',scope:['overflow:connect'],redirectUri:'https://codex.test/callback',state:'host-state',codeChallenge:'original-pkce',codeChallengeMethod:'S256'}));
-  const start=await defaultHandler.fetch(req('/auth/google/start?nonce=nonce'),env);
+async function googleStart(env,clientName='Codex',redirectUri='https://codex.test/callback'){
+  const nonce=crypto.randomUUID();
+  await env.OAUTH_KV.put('consent:'+nonce,JSON.stringify({_client:clientName,clientId:'codex',scope:['overflow:connect'],redirectUri,state:'host-state',codeChallenge:'original-pkce',codeChallengeMethod:'S256'}));
+  const start=await defaultHandler.fetch(req('/auth/google/start?nonce='+nonce),env);
   const location=new URL(start.headers.get('location'));
   return {state:location.searchParams.get('state'),cookie:cookies(start),location};
 }
@@ -33,20 +34,28 @@ async function googleFinish(env,overrides={},clientName='Codex'){
   return {response,html,id:html.match(/name="setup" value="([a-f0-9-]+)"/)?.[1],cookie:cookies(response),start};
 }
 function complete(env,id,cookie,origin=BASE){return defaultHandler.fetch(req('/auth/complete',{method:'POST',headers:{cookie,origin},body:new URLSearchParams({setup:id})}),env)}
+async function legacySetup(env){
+  const id=crypto.randomUUID(),secret=crypto.randomUUID();
+  await env.OAUTH_KV.put('setup:'+id,JSON.stringify({
+    request:{clientId:'codex',scope:['overflow:connect'],redirectUri:'https://codex.test/callback',state:'host-state',codeChallenge:'original-pkce'},
+    identity:{userId:'google-alice',email:'alice@example.com',displayName:'Alice',picture:''},
+    browserHash:await tokenHash(secret),expiresAt:Date.now()+600000,
+  }));
+  return {id,cookie:'__Host-overflow-setup-'+id+'='+secret};
+}
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks()});
 
-test('Google login ends with the supplied hook guide before completing the original OAuth handoff',async()=>{
-  const {env,pool}=await setup();
-  const {response,html,id,cookie,start}=await googleFinish(env);
+test('Google login immediately completes the original OAuth handoff without a return-button click',async()=>{
+  const {env,pool,values}=await setup();
+  const {response,html,start}=await googleFinish(env);
   expect(start.location.searchParams.get('scope')).toBe('openid email profile');
-  expect(response.status).toBe(200);expect(html).toContain('Google connected');
-  expect(response.headers.get('referrer-policy')).toBe('origin');
-  expect(response.headers.get('content-security-policy')).toContain("form-action 'self' https://codex.test;");
-  expect(html).toContain('/setup-hooks-v1.png');expect(html).toContain('less than 10%');
-  expect(env.OAUTH_PROVIDER.completeAuthorization).not.toHaveBeenCalled();
-  const returned=await complete(env,id,cookie);
-  expect(returned.status).toBe(303);expect(returned.headers.get('location')).toBe('https://codex.test/callback?code=test');
-  expect(returned.headers.get('set-cookie')).toContain('__Host-overflow-presence=');
+  expect(response.status).toBe(303);expect(html).toBe('');
+  expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(response.headers.get('location')).toBe('https://codex.test/callback?code=test');
+  expect(response.headers.get('set-cookie')).toContain('__Host-overflow-presence=');
+  expect(response.headers.getSetCookie()).toContainEqual(expect.stringContaining('__Host-overflow-google-'+start.state+'=;'));
+  expect([...values.keys()].some(key=>key.startsWith('setup:'))).toBe(false);
   expect(env.OAUTH_PROVIDER.completeAuthorization).toHaveBeenCalledWith(expect.objectContaining({
     userId:'google-alice',request:expect.objectContaining({state:'host-state',codeChallenge:'original-pkce'}),
     props:expect.objectContaining({picture:'https://lh3.googleusercontent.com/avatar'}),
@@ -54,28 +63,41 @@ test('Google login ends with the supplied hook guide before completing the origi
   const board=await (await pool.fetch(req('/api/activity'))).json();
   expect(board.members[0]).toMatchObject({name:'Alice',balance:10000,picture:'https://lh3.googleusercontent.com/avatar',lastActiveAt:0});
   expect(JSON.stringify(board)).not.toContain('alice@example.com');expect(JSON.stringify(board)).not.toContain('google-alice');
-  expect((await complete(env,id,cookie)).status).toBe(400);
+  expect((await defaultHandler.fetch(req('/auth/google/callback?code=google-code&state='+start.state,{headers:{cookie:start.cookie}}),env)).status).toBe(400);
   expect(env.OAUTH_PROVIDER.completeAuthorization).toHaveBeenCalledTimes(1);
 });
 
-test('OAuth continuation is browser-bound, same-origin, expiring and single-use even for concurrent submits',async()=>{
-  const {env,values}=await setup();const {id,cookie}=await googleFinish(env);
+test('already-open legacy return forms remain browser-bound, same-origin, expiring and single-use',async()=>{
+  const {env,values}=await setup();const {id,cookie}=await legacySetup(env);
   expect((await complete(env,id,'')).status).toBe(400);
   expect((await complete(env,id,cookie,'https://other.test')).status).toBe(400);
   const responses=await Promise.all([complete(env,id,cookie),complete(env,id,cookie)]);
   expect(responses.map(r=>r.status).sort()).toEqual([303,400]);
   expect(env.OAUTH_PROVIDER.completeAuthorization).toHaveBeenCalledTimes(1);
-  const second=await googleFinish(env);
+  const second=await legacySetup(env);
   const pending=JSON.parse(values.get('setup:'+second.id));pending.expiresAt=Date.now()-1;values.set('setup:'+second.id,JSON.stringify(pending));
   expect((await complete(env,second.id,second.cookie)).status).toBe(400);
 });
 
-test('Claude OAuth returns to the same authorization with manual commands and no Codex hook setup',async()=>{
-  const {env}=await setup();const {html,id,cookie}=await googleFinish(env,{},'Claude Code');
-  expect(html).toContain('Return to Claude');expect(html).toContain('/overflow:work');expect(html).toContain('/overflow:earn');
-  expect(html).not.toContain('Codex');expect(html).not.toContain('/setup-hooks-v1.png');expect(html).not.toContain('usage hook');
-  expect((await complete(env,id,cookie)).status).toBe(303);
-  expect(env.OAUTH_PROVIDER.completeAuthorization).toHaveBeenCalledWith(expect.objectContaining({request:expect.objectContaining({state:'host-state',codeChallenge:'original-pkce'})}));
+test('Claude loopback callback receives the original authorization without an intermediate page',async()=>{
+  const {env}=await setup();
+  const redirectUri='http://localhost:3118/callback';
+  const start=await googleStart(env,'Claude Code',redirectUri);
+  vi.stubGlobal('fetch',vi.fn(async()=>Response.json({id_token:googleToken()})));
+  env.OAUTH_PROVIDER.completeAuthorization.mockResolvedValue({redirectTo:redirectUri+'?code=test&state=host-state'});
+  const response=await defaultHandler.fetch(req('/auth/google/callback?code=google-code&state='+start.state,{headers:{cookie:start.cookie}}),env);
+  expect(response.status).toBe(303);expect(await response.text()).toBe('');
+  expect(response.headers.get('location')).toBe(redirectUri+'?code=test&state=host-state');
+  expect(env.OAUTH_PROVIDER.completeAuthorization).toHaveBeenCalledWith(expect.objectContaining({request:expect.objectContaining({redirectUri,state:'host-state',codeChallenge:'original-pkce'})}));
+});
+
+test('concurrent Google callbacks complete the original consent only once',async()=>{
+  const {env}=await setup();const start=await googleStart(env);
+  vi.stubGlobal('fetch',vi.fn(async()=>Response.json({id_token:googleToken()})));
+  const callback=()=>defaultHandler.fetch(req('/auth/google/callback?code=code&state='+start.state,{headers:{cookie:start.cookie}}),env);
+  const responses=await Promise.all([callback(),callback()]);
+  expect(responses.map(r=>r.status).sort()).toEqual([303,400]);
+  expect(env.OAUTH_PROVIDER.completeAuthorization).toHaveBeenCalledTimes(1);
 });
 
 test('Google callbacks cannot be copied into a different browser or accept invalid identity claims',async()=>{
@@ -90,8 +112,8 @@ test('Google callbacks cannot be copied into a different browser or accept inval
 });
 
 test('missing or unsafe profile pictures fall back without preventing Google connection',async()=>{
-  const {env,pool}=await setup();const {id,cookie}=await googleFinish(env,{picture:'https://untrusted.example/picture'});
-  expect((await complete(env,id,cookie)).status).toBe(303);
+  const {env,pool}=await setup();const {response}=await googleFinish(env,{picture:'https://untrusted.example/picture'});
+  expect(response.status).toBe(303);
   const board=await (await pool.fetch(req('/api/activity'))).json();expect(board.members[0].picture).toBe('');
 });
 
