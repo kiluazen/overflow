@@ -25,13 +25,13 @@ test('requester presence does not refresh when another person returns or refunds
   const clock=vi.spyOn(Date,'now');const start=1800000000000;clock.mockReturnValue(start);
   const state=new MemoryState();const pool=new Pool(state,{});await state.ready;
   await remote(pool,'/rpc/submit','requester','Requester',{orders:[order]});
-  expect((await activity(pool)).members.find(m=>m.name==='Requester')).toMatchObject({lastActiveAt:start,activeSource:'codex'});
+  expect((await activity(pool)).members.find(m=>m.name==='Requester')).toMatchObject({lastActiveAt:start,activeSource:'plugin'});
   clock.mockReturnValue(start+121000);
   const claim=await (await remote(pool,'/rpc/claim','worker','Worker',{})).json();
   await remote(pool,'/rpc/return','worker','Worker',{jobId:claim.id,status:'failed',artifact:'Input unavailable'});
   const board=await activity(pool);
   expect(board.members.find(m=>m.name==='Requester')).toMatchObject({lastActiveAt:start,activeSource:null,balance:10000});
-  expect(board.members.find(m=>m.name==='Worker').activeSource).toBe('codex');
+  expect(board.members.find(m=>m.name==='Worker').activeSource).toBe('plugin');
 });
 
 test('browser activity expires and closing one page does not close another page',async()=>{

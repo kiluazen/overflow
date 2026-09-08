@@ -1,15 +1,21 @@
 {
   "name": "overflow",
-  "owner": { "name": "Kushal", "url": "https://github.com/kiluazen" },
+  "owner": {
+    "name": "Kushal",
+    "url": "https://github.com/kiluazen"
+  },
   "metadata": {
-    "description": "Overflow: share work with friends when your Codex allowance runs low."
+    "description": "Overflow: share work with friends from Codex or Claude Code."
   },
   "plugins": [
     {
       "name": "overflow",
-      "description": "Sign in on install, then delegate through /work; friends use visible /earn tasks to claim, perform, and return the work.",
-      "version": "0.8.0",
-      "author": { "name": "Kushal", "url": "https://github.com/kiluazen" },
+      "description": "Delegate work or complete a task for someone through the same connected Overflow account. Supports Codex and Claude Code.",
+      "version": "0.9.0",
+      "author": {
+        "name": "Kushal",
+        "url": "https://github.com/kiluazen"
+      },
       "source": "./plugins/codex",
       "policy": {
         "installation": "AVAILABLE",

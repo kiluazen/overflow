@@ -31,10 +31,15 @@ function consentHtml(nonce, clientName) {
 <body><main class="card"><h1>Connect Overflow</h1><p><b>${client}</b> wants to identify the work you delegate and complete.</p><a class="button" href="/auth/google/start?nonce=${encodeURIComponent(nonce)}">Continue with Google</a><p class="note">Your name, photo, credits, and last active appear on the shared board. Your email stays private.</p></main></body></html>`;
 }
 
-function setupHtml(id) {
+function setupHtml(id, clientName = "") {
+  const claude = /claude/i.test(clientName);
+  const guide = claude
+    ? '<p>Return to Claude to delegate work or earn credits with Overflow. In Claude Code, use <b>/overflow:work</b> or <b>/overflow:earn</b>.</p>'
+    : '<p>Return to Codex, open <b>Overflow → Hooks</b>, and approve the usage hook. This lets Overflow check when you have less than 10% allowance left.</p><img src="/setup-hooks-v1.png" width="1636" height="920" alt="Overflow plugin settings: the Hooks section is below Earn and Work.">';
+  const returnLabel = claude ? "Return to Claude" : "Return to Codex";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finish connecting Overflow</title><style>
   *{box-sizing:border-box}body{margin:0;padding:40px 20px;background:#f5f5ef;color:#29342f;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{max-width:640px;margin:0 auto}h1{font-size:30px;font-weight:500;letter-spacing:-1px;margin:0 0 12px}p{max-width:510px;margin:0 0 24px;color:#606c63}img{display:block;width:100%;height:auto;border-radius:12px;margin:24px 0}button{border:0;border-radius:8px;background:#376451;color:white;font:inherit;font-weight:500;padding:13px 22px;cursor:pointer}button:focus-visible{outline:3px solid #376451;outline-offset:4px}
-  </style></head><body><main class="card"><h1>Google connected</h1><p>Return to Codex, open <b>Overflow → Hooks</b>, and approve the usage hook. This lets Overflow check when you have less than 10% allowance left.</p><img src="/setup-hooks-v1.png" width="1636" height="920" alt="Overflow plugin settings: the Hooks section is below Earn and Work."><form method="post" action="/auth/complete"><input type="hidden" name="setup" value="${escapeHtml(id)}"><button type="submit">Return to Codex</button></form></main></body></html>`;
+  </style></head><body><main class="card"><h1>Google connected</h1>${guide}<form method="post" action="/auth/complete"><input type="hidden" name="setup" value="${escapeHtml(id)}"><button type="submit">${returnLabel}</button></form></main></body></html>`;
 }
 
 export function profilePicture(value) {
@@ -172,7 +177,7 @@ export async function handleGoogleCallback(request, env) {
   });
   headers.append("set-cookie", browserCookie(`__Host-overflow-setup-${id}`, setupSecret, CONSENT_TTL_SECONDS));
   headers.append("set-cookie", browserCookie(`__Host-overflow-google-${state}`, "", 0));
-  return new Response(setupHtml(id), { headers });
+  return new Response(setupHtml(id, parsed._client), { headers });
 }
 
 export async function handleComplete(request, env) {

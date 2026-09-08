@@ -30,7 +30,7 @@ const MAX_ARTIFACT_BYTES = 50 * 1024 * 1024;
 const INBOX_ARTIFACT_CHARS = 20_000;
 const MAX_USER_BATCHES = 50;
 const STARTING_CREDITS = 10_000;
-const CODEX_ACTIVE_MS = 2 * 60 * 1000;
+const PLUGIN_ACTIVE_MS = 2 * 60 * 1000;
 const BROWSER_ACTIVE_MS = 90 * 1000;
 const ORDER_CREDITS = 100;
 // A claimed job cannot disappear forever with a friend's closed laptop. The
@@ -336,27 +336,28 @@ export class Pool {
 
   async recordPresence(userId, browser) {
     const key = `presence:${userId}`;
-    const value = await this.state.storage.get(key) || { codexAt: 0, browserAt: 0, pages: {} };
+    const value = await this.state.storage.get(key) || { pluginAt: 0, browserAt: 0, pages: {} };
     const now = Date.now();
     value.pages = Object.fromEntries(Object.entries(value.pages || {})
       .filter(([, at]) => at > now - BROWSER_ACTIVE_MS).sort((a, b) => b[1] - a[1]).slice(0, 20));
     if (browser) {
       if (browser.visible) { value.pages[browser.sessionId] = now; value.browserAt = now; }
       else delete value.pages[browser.sessionId];
-    } else value.codexAt = now;
+    } else value.pluginAt = now;
     await this.state.storage.put(key, value);
   }
 
   async publicMember(account, now = Date.now()) {
     const presence = await this.state.storage.get(`presence:${account.userId}`) || {};
-    const codexActive = Number(presence.codexAt || 0) > now - CODEX_ACTIVE_MS;
+    const pluginAt = Number(presence.pluginAt || presence.codexAt || 0);
+    const pluginActive = pluginAt > now - PLUGIN_ACTIVE_MS;
     const browserActive = Object.values(presence.pages || {}).some((at) => at > now - BROWSER_ACTIVE_MS);
     return {
       id: account.publicId, name: account.displayName || "someone", picture: profilePicture(account.picture),
       balance: Number(account.balance || 0),
-      lastActiveAt: Math.floor(Math.max(Number(presence.codexAt || 0), Number(presence.browserAt || 0)) / 1000) * 1000,
-      activeSource: codexActive ? "codex" : browserActive ? "browser" : null,
-      activeUntil: codexActive ? Number(presence.codexAt) + CODEX_ACTIVE_MS
+      lastActiveAt: Math.floor(Math.max(pluginAt, Number(presence.browserAt || 0)) / 1000) * 1000,
+      activeSource: pluginActive ? "plugin" : browserActive ? "browser" : null,
+      activeUntil: pluginActive ? pluginAt + PLUGIN_ACTIVE_MS
         : browserActive ? Math.max(...Object.values(presence.pages)) + BROWSER_ACTIVE_MS : 0,
     };
   }
@@ -627,7 +628,7 @@ export class Pool {
     }
     await this.reconcileRemoteClaims();
     const actorAccount = await this.ensureAccount(actor);
-    if (request.headers.get("x-overflow-presence") === "codex" || url.pathname === "/rpc/presence") {
+    if (["plugin", "codex"].includes(request.headers.get("x-overflow-presence")) || url.pathname === "/rpc/presence") {
       await this.recordPresence(actor.userId);
     }
 

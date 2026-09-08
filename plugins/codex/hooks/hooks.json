@@ -1,5 +1,5 @@
 {
-  "description": "Use Codex's native allowance check and delegate below 10% remaining.",
+  "description": "Load the Codex native usage policy; manual Claude workflows need no usage hook.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/usage.sh\"",
+            "command": "if [ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ]; then :; else /bin/sh \"${PLUGIN_ROOT}/hooks/usage.sh\"; fi",
             "timeout": 2,
             "statusMessage": "Loading Overflow"
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/usage.sh\"",
+            "command": "if [ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ]; then :; else /bin/sh \"${PLUGIN_ROOT}/hooks/usage.sh\"; fi",
             "timeout": 2,
             "statusMessage": "Loading Overflow"
           }

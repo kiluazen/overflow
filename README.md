@@ -32,6 +32,39 @@ This requires the Codex desktop host to expose that native tool; an unsupported
 host keeps manual `/work` and `/earn` available. A long-running turn catches
 changes on the next user prompt, rather than continuously monitoring usage.
 
+## Claude Code
+
+Install the same public plugin through Claude Code:
+
+```text
+/plugin marketplace add kiluazen/overflow
+/plugin install overflow@overflow
+/reload-plugins
+/mcp
+```
+
+In `/mcp`, select Overflow and complete Google sign-in. Use
+`/overflow:work <task>` to delegate, `/overflow:work status` to retrieve work,
+and `/overflow:earn` to take one queued task. Use the same Google account to
+keep the same credits and inbox across Codex and Claude Code.
+
+Claude Code uses manual commands. There is no local server, usage cache,
+status-line setup, or background monitor. The shared hook exits quietly in
+Claude; automatic allowance routing continues only on Codex hosts that expose
+the native usage tool. Claude does not need to approve a usage hook to use the
+manual commands.
+
+If Claude's Chrome integration is available, the skill can open the board there.
+Otherwise it returns the dashboard link and continues. No browser integration
+is required to delegate or earn. Claude result recovery is manual through
+`/overflow:work status`; it does not create Codex-style scheduled checks.
+
+The package contains the standard manifest for each host. Its existing
+`plugins/codex` source path is retained so current marketplace installs keep
+working. The shared marketplace's Codex `policy` metadata is ignored by Claude;
+Claude authenticates through its normal MCP connection flow. Claude web/cloud
+support is not established by this local Claude Code release.
+
 ## What happens
 
 ```text
@@ -82,7 +115,7 @@ of the requester's conversation and filesystem do not travel automatically.
 
 ## Architecture
 
-- Plugin: two skills, SessionStart and UserPromptSubmit hooks, and one remote MCP declaration.
+- Plugin: two shared skills, native Codex and Claude manifests, Codex usage hooks, and one remote MCP declaration.
 - Wake-up: a finite Codex heartbeat attached to the requesting task; no local
   daemon, listener, or relay.
 - Identity: OAuth 2.1 to Overflow, with Google sign-in upstream.

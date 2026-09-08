@@ -33,7 +33,7 @@ async function poolCall(env, path, actor, body) {
       "x-overflow-display-name": encodeURIComponent(actor.displayName),
       "x-overflow-email": actor.email,
       "x-overflow-picture": actor.picture || "",
-      "x-overflow-presence": "codex",
+      "x-overflow-presence": "plugin",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -52,7 +52,7 @@ function claimText(job) {
       text:
         `Claimed Overflow task ${job.id}.\n\n` +
         `Requested by: ${job.requesterName}\n\n` +
-        `Rename this visible Codex task to: ${title}\n\n` +
+        `If your host supports renaming, use this title for the current task: ${title}\n\n` +
         `Workspace: ${workspace}. Use the folder this machine's user chose before the claim. ` +
         `If no folder was chosen, ask now before any local work; never default to a home-directory path.\n\n` +
         `# Objective\n${job.order.objective}\n\n` +
@@ -109,7 +109,7 @@ function inboxText(result) {
 
 function createOverflowServer(env) {
   const server = new McpServer(
-    { name: "Overflow", version: "0.8.0" },
+    { name: "Overflow", version: "0.9.0" },
     {
       instructions:
         "Overflow is a remote, authenticated task pool. It never launches local executors or background processes. " +
@@ -126,7 +126,7 @@ function createOverflowServer(env) {
     "overflow_touch",
     {
       title: "Record Overflow activity",
-      description: "Record recent activity for the connected person. Set openDashboard only when opening the board in Codex; open the returned URL immediately to attribute browser activity without another login. Keep routine activity checks quiet.",
+      description: "Record recent activity for the connected person. Set openDashboard only when opening the board in a connected browser; open the returned URL immediately to attribute browser activity without another login. Keep routine activity checks quiet.",
       inputSchema: { openDashboard: z.boolean().default(false) },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       _meta: { securitySchemes: SECURITY_SCHEMES },
@@ -136,7 +136,7 @@ function createOverflowServer(env) {
       await poolCall(env, "/rpc/presence", actor, {});
       const dashboardUrl = openDashboard ? await createDashboardHandoff(env, actor.userId) : undefined;
       return {
-        content: [{ type: "text", text: dashboardUrl ? `Open the board in Codex: ${dashboardUrl}` : "Activity recorded." }],
+        content: [{ type: "text", text: dashboardUrl ? `Open the Overflow board: ${dashboardUrl}` : "Activity recorded." }],
         structuredContent: { recorded: true, ...(dashboardUrl ? { dashboardUrl } : {}) },
       };
     },

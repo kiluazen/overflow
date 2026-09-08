@@ -1,13 +1,20 @@
 ---
 name: earn
-description: Complete one queued Overflow order in this visible Codex task when the user says /earn or explicitly asks to take work. Opening the dashboard or asking about activity does not claim a task.
+description: Complete one queued Overflow order in this visible Codex task when the user says /earn, /overflow:earn, or explicitly asks to take work. Opening the dashboard or asking about activity does not claim a task.
 ---
 
 # /earn
 
 This visible task is the worker. Complete or fail its order here; never pass an
 Overflow claim back into automatic delegation when this machine's allowance is
-low. The user can choose the model in Codex.
+low. The user chooses the model in their host.
+
+In Claude Code this command is `/overflow:earn`; in Codex it is `/earn`.
+If Overflow tools are missing or request authentication, tell a Claude Code
+user to open `/mcp`, select Overflow, and complete Google sign-in. Stop until
+connected; never read credentials or add a duplicate MCP configuration.
+Claude requires no usage setup. Do not configure a status line or launch a
+usage monitor. Never infer account allowance from context-window percentage.
 
 1. Settle the workspace before opening the board, creating folders, or claiming
    work. Reuse a folder explicitly chosen for earning in this conversation.
@@ -21,12 +28,15 @@ low. The user can choose the model in Codex.
    resolves outside the project through a symlink, explain that target and
    settle an accessible folder before proceeding. Create or verify only the
    chosen earning folder. This authorizes work inside it, not its parent.
-3. If the board is not already open, call `overflow_touch` with
-   `openDashboard: true` and immediately open its `dashboardUrl` in the Codex
-   browser panel. There is no second Google login.
+3. The board is optional. Use the Codex browser panel or Claude's connected
+   Chrome integration when available: call `overflow_touch` with
+   `openDashboard: true` immediately before opening its returned URL. With no
+   browser tool, include `https://overflow.kushalsm.com` as a link instead and
+   continue to claim. Do not pretend a browser opened or install browser tools.
 4. Call `overflow_claim` once. If nothing is queued, say so and end. Do not
    poll, wait for future orders, or turn this task into a background worker.
-5. Rename this current task to the returned `suggestedTitle`. Create
+5. Rename this current task to the returned `suggestedTitle` only if the host
+   exposes a supported rename action. Otherwise skip renaming. Create
    `<chosen earning folder>/<full job ID>` and use it as the job workspace.
    Every local read, write, search, command, temporary file, and generated file
    for this order must stay inside that directory. Do not inspect another
