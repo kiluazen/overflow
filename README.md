@@ -33,7 +33,7 @@ The hook uses the system shell to give the current agent instructions. The
 agent reads the host's native `get_usage_limits` tool. No Python, Node, separate
 Codex CLI, local MCP server, or background process is needed for this check.
 This requires the Codex desktop host to expose that native tool; an unsupported
-host keeps manual `overflow work` and `overflow earn` available. A long-running turn catches
+host keeps manual `work` and `earn` skills available. A long-running turn catches
 changes on the next user prompt, rather than continuously monitoring usage.
 
 ## Claude Code
@@ -48,8 +48,8 @@ Install the same public plugin through Claude Code:
 ```
 
 In `/mcp`, select Overflow and complete Google sign-in. Use
-`/overflow:overflow work <task>` to delegate, `/overflow:overflow status` to retrieve work,
-and `/overflow:overflow earn` to take one queued task. Use the same Google account to
+`/overflow:work <task>` to delegate, `/overflow:work status` to retrieve work,
+and `/overflow:earn` to take one queued task. Use the same Google account to
 keep the same credits and inbox across Codex and Claude Code.
 
 Claude Code uses manual commands. There is no local server, usage cache,
@@ -61,7 +61,7 @@ manual commands.
 If Claude's Chrome integration is available, the skill can open the board there.
 Otherwise it returns the dashboard link and continues. No browser integration
 is required to delegate or earn. Claude result recovery is manual through
-`/overflow:overflow status`; it does not create Codex-style scheduled checks.
+`/overflow:work status`; it does not create Codex-style scheduled checks.
 
 The package contains the standard manifest for each host. Its existing
 `plugins/codex` source path is retained so current marketplace installs keep
@@ -119,7 +119,7 @@ of the requester's conversation and filesystem do not travel automatically.
 
 ## Architecture
 
-- Plugin: one shared Overflow skill with work, earn, and status flows, native Codex and Claude manifests, Codex usage hooks, and one remote MCP declaration.
+- Plugin: separate work and earn skills, with result recovery through work status, native Codex and Claude manifests, Codex usage hooks, and one remote MCP declaration.
 - Wake-up: a finite Codex heartbeat attached to the requesting task; no local
   daemon, listener, or relay.
 - Identity: OAuth 2.1 to Overflow, with Google sign-in upstream.
@@ -168,8 +168,8 @@ The production Worker requires `GOOGLE_CLIENT_ID` and
 
 ```text
 plugins/codex/hooks/usage.sh          native usage policy instructions
-plugins/codex/skills/overflow/SKILL.md       one discoverable entry point
-plugins/codex/skills/overflow/references/    requester and worker flows
+plugins/codex/skills/work/SKILL.md     delegate tasks and recover results
+plugins/codex/skills/earn/SKILL.md     complete one queued task
 plugins/codex/.mcp.json               remote authenticated MCP
 relay/src/mcp.js                      pool tools
 relay/src/oauth.js                    OAuth and Google sign-in

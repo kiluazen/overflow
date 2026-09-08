@@ -1,10 +1,15 @@
-# Overflow earn
+---
+name: earn
+description: Complete one queued Overflow order in this visible task when the user says /earn, /overflow:earn, or explicitly asks to take work. Opening the dashboard or asking about activity does not claim a task.
+---
+
+# /earn
 
 This visible task is the worker. Complete or fail its order here; never pass an
 Overflow claim back into automatic delegation when this machine's allowance is
 low. The user chooses the model in their host.
 
-Enter this flow through the `overflow` skill with `earn` as the action.
+In Claude Code this command is `/overflow:earn`; in Codex choose the Overflow `earn` skill.
 If Overflow tools are missing or request authentication, tell a Claude Code
 user to open `/mcp`, select Overflow, and complete Google sign-in. Stop until
 connected; never read credentials or add a duplicate MCP configuration.

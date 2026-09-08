@@ -1,8 +1,13 @@
-# Overflow work
+---
+name: work
+description: Offload work through Overflow when the user says /work or /overflow:work, asks to delegate, or a supported Codex native allowance check reports strictly less than 10% remaining. Keep this task as the coordinator.
+---
+
+# /work
 
 Send one self-contained order and bring its result back here.
 
-Enter this flow through the `overflow` skill with `work` as the action.
+In Claude Code this command is `/overflow:work`; in Codex choose the Overflow `work` skill.
 Claude uses manual delegation only. Do not read allowance files, configure a
 status line, launch a usage process, or infer allowance from the context window.
 
@@ -46,7 +51,7 @@ until connected; do not read credentials or add a duplicate MCP configuration.
 6. Say briefly that the task is waiting for a computer, and give the actual
    reserved/available credits from the tool response. Mention scheduled checks
    only if creation succeeded. If heartbeats are unavailable, say that the user
-   can ask for the result later (`/overflow:overflow status` in Claude Code). End
+   can ask for the result later (`/overflow:work status` in Claude Code). End
    the turn; do not poll or invent progress.
 7. When asked about the work later, call `overflow_inbox` once. It recovers the
    requester's batches without a saved ID. Read the artifact and open/download
@@ -56,7 +61,7 @@ until connected; do not read credentials or add a duplicate MCP configuration.
 Automatic delegation uses the host-native allowance reading: the main bucket's
 most constrained available window must have strictly less than 10% remaining.
 Exactly 10% is outside that condition. Respect a keep-local instruction. Do not
-delegate greetings, status requests, setup, `overflow earn`, or work already claimed
+delegate greetings, status requests, setup, `/earn`, or work already claimed
 from Overflow. Missing usage data is unknown, not low allowance.
 
 Overflow identity is the Google account connected during installation. Never
