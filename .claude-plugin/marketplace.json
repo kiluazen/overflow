@@ -11,7 +11,7 @@
     {
       "name": "overflow",
       "description": "Delegate work or complete a task for someone through the same connected Overflow account. Supports Codex and Claude Code.",
-      "version": "0.9.0",
+      "version": "0.9.1",
       "author": {
         "name": "Kushal",
         "url": "https://github.com/kiluazen"

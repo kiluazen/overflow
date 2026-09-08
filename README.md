@@ -15,7 +15,7 @@ Every Google account starts with 10,000 credits. Delegating one order reserves
 100 credits; successful completion transfers them to the worker, while failure
 refunds the requester.
 
-The hook checks at session start and on new user prompts. Exactly 10% stays
+The single hook runs when you submit a prompt. Exactly 10% stays
 local. Missing usage data leaves normal work available; `/work` still works.
 
 ## Install
