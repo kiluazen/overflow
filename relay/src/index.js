@@ -39,6 +39,7 @@ const ORDER_CREDITS = 100;
 // the requester's held credits.
 const REMOTE_CLAIM_TTL_MS = 90 * 60 * 1000;
 const MAX_REMOTE_CLAIM_ATTEMPTS = 2;
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="#f5f5ef"/><path d="M10 23c9-11 15 11 22 0s13 11 22 0M10 39c9-11 15 11 22 0s13 11 22 0" fill="none" stroke="#376451" stroke-width="5" stroke-linecap="round"/></svg>`;
 
 function safeFileName(value) {
   const name = String(value || "artifact").replace(/[\r\n"\\/]/g, "_").trim();
@@ -115,7 +116,7 @@ export const defaultHandler = {
     // The board and its activity feed are public so friends can watch the
     // experiment. Every route that moves an order requires either the old
     // dogfood invite code or an OAuth bearer handled by the MCP provider.
-    const publicPaths = new Set(["/", "/board", "/bg.jpg", "/shoreline-v2.jpg", "/setup-hooks-v1.png", "/api/activity"]);
+    const publicPaths = new Set(["/", "/board", "/favicon.svg", "/bg.jpg", "/shoreline-v2.jpg", "/setup-hooks-v1.png", "/api/activity"]);
     const capabilityPath = url.pathname.startsWith("/api/uploads/") ||
       url.pathname.startsWith("/api/artifacts/") || url.pathname.startsWith("/api/input-uploads/") ||
       url.pathname.startsWith("/api/input-files/");
@@ -136,6 +137,8 @@ export const defaultHandler = {
         return new Response(BOARD_HTML, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
+      case "/favicon.svg":
+        return new Response(FAVICON_SVG, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } });
       case "/bg.jpg":
       case "/shoreline-v2.jpg":
       case "/setup-hooks-v1.png": {
@@ -151,6 +154,7 @@ export const defaultHandler = {
       }
       case "/api/activity":
       case "/api/reset":
+      case "/api/jobs/delete":
       case "/earn":
       case "/delegate":
       case "/status":
@@ -1008,12 +1012,43 @@ export class Pool {
       return Response.json({ cleared: true });
     }
 
+    if (url.pathname === "/api/jobs/delete") {
+      if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      const ids = [...new Set((await request.json().catch(() => ({}))).ids || [])]
+        .filter((id) => /^[a-f0-9-]{36}$/.test(id));
+      if (!ids.length || ids.length > 100) return Response.json({ error: "provide 1 to 100 job ids" }, { status: 400 });
+      const jobs = await Promise.all(ids.map((id) => this.state.storage.get(this.remoteJobKey(id))));
+      if (jobs.some((job) => job && !["completed", "failed"].includes(job.status))) {
+        return Response.json({ error: "only finished jobs can be deleted" }, { status: 409 });
+      }
+      const deleted = ids.filter((id, index) => Boolean(jobs[index]));
+      await Promise.all(deleted.map((id) => this.state.storage.delete(this.remoteJobKey(id))));
+      const deletedSet = new Set(deleted);
+      const events = (await this.state.storage.get("events")) || [];
+      await this.state.storage.put("events", events.filter((event) => !deletedSet.has(event.jobId)));
+      return Response.json({ deleted });
+    }
+
     if (url.pathname === "/api/activity") {
       await this.withRemoteLock(() => this.reconcileRemoteClaims());
       const events = (await this.state.storage.get("events")) || [];
       const remoteJobs = (await this.remoteJobs())
         .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
-      const accounts = (await this.accounts())
+      // OAuth account initialization used to be best-effort after the grant was
+      // issued. Rebuild any missing member from authenticated job history so a
+      // transient callback failure cannot erase a real participant from Credits.
+      const knownAccounts = new Map((await this.accounts()).map((account) => [account.userId, account]));
+      for (const job of remoteJobs) {
+        for (const actor of [
+          { userId: job.requesterUserId, displayName: job.requesterName, email: job.requesterEmail },
+          { userId: job.workerUserId, displayName: job.workerName, email: job.workerEmail },
+        ]) {
+          if (actor.userId?.startsWith("google-") && !knownAccounts.has(actor.userId)) {
+            knownAccounts.set(actor.userId, await this.ensureAccount(actor));
+          }
+        }
+      }
+      const accounts = [...knownAccounts.values()]
         .sort((left, right) => String(left.displayName || "").localeCompare(String(right.displayName || "")));
       const accountById = new Map(accounts.map((account) => [account.userId, account]));
       const now = Date.now();
