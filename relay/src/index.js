@@ -1,14 +1,19 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { BOARD_HTML } from "./board.js";
+import { compareJobs } from "./board-model.js";
 import { BG_JPEG_BASE64 } from "./bg.js";
 import { SHORELINE_JPEG_BASE64 } from "./shoreline.js";
-import { startDashboardLogin, dashboardAccount, logoutDashboard } from "./dashboard-auth.js";
+import { HOOKS_PNG_BASE64 } from "./hooks-screenshot.js";
+import { acceptDashboardHandoff, browserHeartbeat } from "./browser-presence.js";
+import { InputAttachments, InputError } from "./input-attachments.js";
 import { createOverflowMcpHandler } from "./mcp.js";
 import {
   handleAuthorize,
   handleGoogleCallback,
   handleGoogleStart,
+  handleComplete,
   handleProtectedResource,
+  profilePicture,
 } from "./oauth.js";
 
 // Overflow relay: one Durable Object holding the job board. The authenticated
@@ -24,7 +29,9 @@ const DOWNLOAD_TTL_MS = 60 * 60 * 1000;
 const MAX_ARTIFACT_BYTES = 50 * 1024 * 1024;
 const INBOX_ARTIFACT_CHARS = 20_000;
 const MAX_USER_BATCHES = 50;
-const STARTING_CREDITS = 1_000;
+const STARTING_CREDITS = 10_000;
+const CODEX_ACTIVE_MS = 2 * 60 * 1000;
+const BROWSER_ACTIVE_MS = 90 * 1000;
 const ORDER_CREDITS = 100;
 // A claimed job cannot disappear forever with a friend's closed laptop. The
 // worker gets long enough for a substantial Codex task, then the order is
@@ -99,16 +106,19 @@ export const defaultHandler = {
     }
     if (url.pathname === "/auth/google/start") return handleGoogleStart(request, env);
     if (url.pathname === "/auth/google/callback") return handleGoogleCallback(request, env);
-    if (url.pathname === "/auth/dashboard/start") return startDashboardLogin(request, env);
-    if (url.pathname === "/auth/dashboard/logout") return logoutDashboard(request, env);
-    if (url.pathname === "/api/account") return dashboardAccount(request, env);
+    if (url.pathname === "/auth/complete") return handleComplete(request, env);
+    if (url.pathname.startsWith("/presence/connect/")) return acceptDashboardHandoff(request, env);
+    if (url.pathname === "/api/presence") return browserHeartbeat(request, env);
+    if (url.pathname === "/auth/dashboard/start") return Response.redirect(`${url.origin}/`, 302);
+    if (url.pathname === "/api/account" || url.pathname === "/auth/dashboard/logout") return new Response("Not found", { status: 404 });
 
     // The board and its activity feed are public so friends can watch the
     // experiment. Every route that moves an order requires either the old
     // dogfood invite code or an OAuth bearer handled by the MCP provider.
-    const publicPaths = new Set(["/", "/board", "/bg.jpg", "/shoreline-v2.jpg", "/api/activity"]);
+    const publicPaths = new Set(["/", "/board", "/bg.jpg", "/shoreline-v2.jpg", "/setup-hooks-v1.png", "/api/activity"]);
     const capabilityPath = url.pathname.startsWith("/api/uploads/") ||
-      url.pathname.startsWith("/api/artifacts/");
+      url.pathname.startsWith("/api/artifacts/") || url.pathname.startsWith("/api/input-uploads/") ||
+      url.pathname.startsWith("/api/input-files/");
     let identity = null;
     if (!publicPaths.has(url.pathname) && !capabilityPath) {
       identity = await poolIdentity(token, env, url.searchParams.get("name") || "");
@@ -127,13 +137,14 @@ export const defaultHandler = {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
       case "/bg.jpg":
-      case "/shoreline-v2.jpg": {
-        const binary = atob(url.pathname === "/bg.jpg" ? BG_JPEG_BASE64 : SHORELINE_JPEG_BASE64);
+      case "/shoreline-v2.jpg":
+      case "/setup-hooks-v1.png": {
+        const binary = atob(url.pathname === "/setup-hooks-v1.png" ? HOOKS_PNG_BASE64 : url.pathname === "/bg.jpg" ? BG_JPEG_BASE64 : SHORELINE_JPEG_BASE64);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
         return new Response(bytes, {
           headers: {
-            "content-type": "image/jpeg",
+            "content-type": url.pathname.endsWith(".png") ? "image/png" : "image/jpeg",
             "cache-control": "public, max-age=31536000, immutable",
           },
         });
@@ -173,8 +184,10 @@ export class Pool {
     // overlap. Serialize account/job transitions so two claims or duplicate
     // returns cannot observe the same pre-mutation state.
     this.remoteLock = Promise.resolve();
+    this.inputs = new InputAttachments(this);
     this.state.blockConcurrencyWhile(async () => {
       this.queue = (await this.state.storage.get("queue")) || [];
+      for (const account of await this.accounts()) await this.migrateAccount(account);
     });
   }
 
@@ -244,11 +257,22 @@ export class Pool {
   }
 
   actor(request) {
+    const displayName = request.headers.get("x-overflow-display-name") || "";
     return {
       userId: request.headers.get("x-overflow-user-id") || "",
-      displayName: request.headers.get("x-overflow-display-name") || "someone",
+      displayName: (() => { try { return decodeURIComponent(displayName); } catch { return displayName; } })(),
       email: request.headers.get("x-overflow-email") || "",
+      picture: profilePicture(request.headers.get("x-overflow-picture") || ""),
     };
+  }
+
+  async migrateAccount(account) {
+    if (account.startingGrant === STARTING_CREDITS && account.publicId) return account;
+    account.balance = Number(account.balance || 0) + Math.max(0, STARTING_CREDITS - Number(account.startingGrant || 1000));
+    account.startingGrant = STARTING_CREDITS;
+    account.publicId ||= crypto.randomUUID();
+    await this.saveAccount(account);
+    return account;
   }
 
   async ensureAccount(actor) {
@@ -261,6 +285,8 @@ export class Pool {
       displayName: actor.displayName || "someone",
       email: actor.email || "",
       balance: STARTING_CREDITS,
+      startingGrant: STARTING_CREDITS,
+      publicId: crypto.randomUUID(),
       reserved: 0,
       earned: 0,
       spent: 0,
@@ -271,7 +297,8 @@ export class Pool {
     };
     account.displayName = actor.displayName || account.displayName || "someone";
     account.email = actor.email || account.email || "";
-    account.lastSeenAt = now;
+    if (actor.picture) account.picture = actor.picture;
+    await this.migrateAccount(account);
     await this.state.storage.put(key, account);
     if (!existing) {
       await this.recordEvent({
@@ -304,11 +331,37 @@ export class Pool {
       delegated: Number(account.delegated || 0),
       completed: Number(account.completed || 0),
       createdAt: Number(account.createdAt || 0),
-      lastSeenAt: Number(account.lastSeenAt || 0),
     };
   }
 
-  publicJob(job) {
+  async recordPresence(userId, browser) {
+    const key = `presence:${userId}`;
+    const value = await this.state.storage.get(key) || { codexAt: 0, browserAt: 0, pages: {} };
+    const now = Date.now();
+    value.pages = Object.fromEntries(Object.entries(value.pages || {})
+      .filter(([, at]) => at > now - BROWSER_ACTIVE_MS).sort((a, b) => b[1] - a[1]).slice(0, 20));
+    if (browser) {
+      if (browser.visible) { value.pages[browser.sessionId] = now; value.browserAt = now; }
+      else delete value.pages[browser.sessionId];
+    } else value.codexAt = now;
+    await this.state.storage.put(key, value);
+  }
+
+  async publicMember(account, now = Date.now()) {
+    const presence = await this.state.storage.get(`presence:${account.userId}`) || {};
+    const codexActive = Number(presence.codexAt || 0) > now - CODEX_ACTIVE_MS;
+    const browserActive = Object.values(presence.pages || {}).some((at) => at > now - BROWSER_ACTIVE_MS);
+    return {
+      id: account.publicId, name: account.displayName || "someone", picture: profilePicture(account.picture),
+      balance: Number(account.balance || 0),
+      lastActiveAt: Math.floor(Math.max(Number(presence.codexAt || 0), Number(presence.browserAt || 0)) / 1000) * 1000,
+      activeSource: codexActive ? "codex" : browserActive ? "browser" : null,
+      activeUntil: codexActive ? Number(presence.codexAt) + CODEX_ACTIVE_MS
+        : browserActive ? Math.max(...Object.values(presence.pages)) + BROWSER_ACTIVE_MS : 0,
+    };
+  }
+
+  publicJob(job, accountById = new Map()) {
     return {
       id: job.id,
       batch: job.batch,
@@ -317,6 +370,8 @@ export class Pool {
       expectedArtifact: String(job.order?.expectedArtifact || ""),
       requester: job.requesterName || "someone",
       worker: job.workerName || "",
+      requesterMemberId: accountById.get(job.requesterUserId)?.publicId || "",
+      workerMemberId: accountById.get(job.workerUserId)?.publicId || "",
       credits: Number(job.creditCost || 0),
       createdAt: Number(job.createdAt || 0),
       claimedAt: Number(job.claimedAt || 0),
@@ -325,12 +380,13 @@ export class Pool {
       completedAt: Number(job.completedAt || 0),
       artifactChars: String(job.result?.artifact || "").length,
       files: (job.result?.files || []).map((file) => safeFileName(file?.name)),
+      inputCount: (job.order?.inputArtifactIds || []).length,
     };
   }
 
   publicEvent(event) {
-    // Explicit allowlist: neither balances nor private result data belong on
-    // the public board, even if new internal event fields are added later.
+    // Explicit allowlist: private result data and account identifiers never
+    // belong on the public board. Public credit balances come from members.
     const fields = ["at", "type", "jobId", "objective", "requester", "worker", "member",
       "attempts", "leaseExpiresAt", "artifactChars", "files"];
     return Object.fromEntries(fields.filter((key) => key in event)
@@ -348,6 +404,8 @@ export class Pool {
       .filter((job) => job.status === "claimed")
       .map((job) => Number(job.leaseExpiresAt || (Number(job.claimedAt || 0) + REMOTE_CLAIM_TTL_MS)))
       .filter((at) => at > 0)
+      .concat(await this.inputs.deadlines(), [...(await this.state.storage.list({ prefix: "once:" })).values()].map((value) => value.expiresAt))
+      .filter((at) => Number.isFinite(at) && at > 0)
       .sort((left, right) => left - right);
     if (active.length) {
       await this.state.storage.setAlarm(active[0]);
@@ -444,12 +502,17 @@ export class Pool {
   }
 
   async alarm() {
-    await this.withRemoteLock(() => this.reconcileRemoteClaims());
+    await this.withRemoteLock(async () => {
+      await this.reconcileRemoteClaims();
+      await this.inputs.cleanup();
+      await this.cleanupExpiredCapabilities();
+      await this.scheduleNextRemoteLease();
+    });
   }
 
   async cleanupExpiredCapabilities() {
     const now = Date.now();
-    for (const prefix of ["upload:", "download:"]) {
+    for (const prefix of ["upload:", "download:", "once:"]) {
       const entries = await this.state.storage.list({ prefix });
       const expired = [...entries.entries()]
         .filter(([, value]) => Number(value?.expiresAt || 0) <= now)
@@ -531,14 +594,51 @@ export class Pool {
   }
 
   async handleRemote(request, url) {
-    return this.withRemoteLock(() => this.handleRemoteUnlocked(request, url));
+    try { return await this.withRemoteLock(() => this.handleRemoteUnlocked(request, url)); }
+    catch (error) {
+      if (error instanceof InputError) return Response.json({ error: error.message }, { status: error.status });
+      throw error;
+    }
   }
 
   async handleRemoteUnlocked(request, url) {
     const actor = this.actor(request);
     if (!actor.userId) return Response.json({ error: "missing authenticated actor" }, { status: 401 });
+    if (url.pathname === "/rpc/consume-once") {
+      const body = await request.json();
+      if (!["oauth", "presence"].includes(body.namespace) || !/^[a-f0-9-]{36,64}$/.test(body.id || "") ||
+          !(body.expiresAt > Date.now() && body.expiresAt <= Date.now() + 11 * 60 * 1000)) {
+        return Response.json({ error: "invalid handoff" }, { status: 400 });
+      }
+      const key = `once:${body.namespace}:${body.id}`;
+      if (await this.state.storage.get(key)) return Response.json({ error: "already used" }, { status: 409 });
+      await this.state.storage.put(key, { expiresAt: body.expiresAt });
+      await this.scheduleNextRemoteLease();
+      return Response.json({ consumed: true });
+    }
+    if (url.pathname === "/rpc/browser-presence") {
+      if (!await this.state.storage.get(this.accountKey(actor.userId))) return new Response(null, { status: 404 });
+      const body = await request.json();
+      if (typeof body.visible !== "boolean" || !/^[a-f0-9:.-]{1,120}$/.test(body.sessionId || "")) {
+        return Response.json({ error: "invalid presence event" }, { status: 400 });
+      }
+      await this.recordPresence(actor.userId, body);
+      return new Response(null, { status: 204 });
+    }
     await this.reconcileRemoteClaims();
     const actorAccount = await this.ensureAccount(actor);
+    if (request.headers.get("x-overflow-presence") === "codex" || url.pathname === "/rpc/presence") {
+      await this.recordPresence(actor.userId);
+    }
+
+    if (url.pathname === "/rpc/presence") return Response.json({ recorded: true });
+
+    if (url.pathname === "/rpc/input-uploads") return Response.json(await this.inputs.prepare(actor, await request.json()));
+    if (url.pathname === "/rpc/inputs") {
+      const job = await this.state.storage.get(this.remoteJobKey(url.searchParams.get("jobId") || ""));
+      if (!job) return Response.json({ error: "unknown job" }, { status: 404 });
+      return Response.json({ jobId: job.id, files: await this.inputs.manifest(job, actor.userId) });
+    }
 
     if (url.pathname === "/rpc/account-init" || url.pathname === "/rpc/account") {
       return Response.json({
@@ -564,6 +664,7 @@ export class Pool {
       const orders = Array.isArray(body.orders) ? body.orders : [];
       if (!orders.length) return Response.json({ error: "no orders" }, { status: 400 });
       if (orders.length > 8) return Response.json({ error: "at most 8 orders may be delegated at once" }, { status: 400 });
+      const inputGroups = await this.inputs.validateOrders(orders, actor);
       const reserve = orders.length * ORDER_CREDITS;
       if (Number(actorAccount.balance || 0) < reserve) {
         return Response.json({
@@ -594,6 +695,7 @@ export class Pool {
         ids.push(id);
         this.queue.push(job);
         await this.state.storage.put(this.remoteJobKey(id), job);
+        await this.inputs.attach(inputGroups[index], id);
         await this.recordEvent({
           type: "queued",
           jobId: id,
@@ -615,6 +717,7 @@ export class Pool {
       userBatches = [batch, ...userBatches.filter((item) => item !== batch)].slice(0, MAX_USER_BATCHES);
       await this.state.storage.put(this.remoteUserBatchesKey(actor.userId), userBatches);
       await this.saveQueue();
+      await this.scheduleNextRemoteLease();
       return Response.json({
         batch,
         jobs: ids,
@@ -650,7 +753,7 @@ export class Pool {
         credits: Number(job.creditCost || 0),
         creditState: "reserved",
       });
-      return Response.json(claimed);
+      return Response.json({ ...claimed, inputs: await this.inputs.manifest(claimed, actor.userId) });
     }
 
     if (url.pathname === "/rpc/uploads") {
@@ -834,6 +937,14 @@ export class Pool {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/rpc/")) return this.handleRemote(request, url);
+    if (url.pathname.startsWith("/api/input-uploads/") || url.pathname.startsWith("/api/input-files/")) {
+      try {
+        return await (url.pathname.startsWith("/api/input-uploads/") ? this.inputs.upload(request) : this.inputs.download(request));
+      } catch (error) {
+        if (error instanceof InputError) return Response.json({ error: error.message }, { status: error.status });
+        throw error;
+      }
+    }
 
     if (url.pathname.startsWith("/api/uploads/")) {
       if (request.method !== "PUT") return new Response("method not allowed", { status: 405 });
@@ -902,7 +1013,10 @@ export class Pool {
       const remoteJobs = (await this.remoteJobs())
         .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
       const accounts = (await this.accounts())
-        .sort((left, right) => Number(right.lastSeenAt || 0) - Number(left.lastSeenAt || 0));
+        .sort((left, right) => String(left.displayName || "").localeCompare(String(right.displayName || "")));
+      const accountById = new Map(accounts.map((account) => [account.userId, account]));
+      const now = Date.now();
+      const members = await Promise.all(accounts.map((account) => this.publicMember(account, now)));
       const sockets = this.socketsTagged("earner").map((ws) => {
         const meta = this.meta(ws);
         return { name: meta.name || "anon", busy: Boolean(meta.busy) };
@@ -936,7 +1050,7 @@ export class Pool {
       const failed = visibleJobs.filter((job) => job.status === "failed").length;
       return Response.json(
         {
-          now: Date.now(),
+          now,
           totals: {
             accounts: accounts.length,
             jobs: visibleJobs.length,
@@ -945,7 +1059,8 @@ export class Pool {
             completed,
             failed,
           },
-          jobs: visibleJobs.slice(0, 100).map((job) => this.publicJob(job)),
+          members,
+          jobs: visibleJobs.sort(compareJobs).slice(0, 100).map((job) => this.publicJob(job, accountById)),
           machines: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
           online: sockets.length,
           idle: sockets.filter((s) => !s.busy).length,

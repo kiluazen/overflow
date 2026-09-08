@@ -2,114 +2,16 @@ import { expect, test } from "vitest";
 
 import { Pool } from "../src/index.js";
 
-class MemoryStorage {
-  constructor() {
-    this.values = new Map();
-    this.alarmAt = null;
-  }
+import { MemoryState, MemoryBucket, remote } from "./helpers.mjs";
 
-  async get(key) {
-    return this.values.get(key);
-  }
-
-  async put(key, value) {
-    this.values.set(key, structuredClone(value));
-  }
-
-  async delete(key) {
-    this.values.delete(key);
-  }
-
-  async list({ prefix }) {
-    return new Map([...this.values].filter(([key]) => key.startsWith(prefix)));
-  }
-
-  async setAlarm(at) {
-    this.alarmAt = Number(at);
-  }
-
-  async getAlarm() {
-    return this.alarmAt;
-  }
-
-  async deleteAlarm() {
-    this.alarmAt = null;
-  }
-}
-
-class MemoryState {
-  constructor() {
-    this.storage = new MemoryStorage();
-    this.ready = Promise.resolve();
-  }
-
-  blockConcurrencyWhile(callback) {
-    this.ready = callback();
-    return this.ready;
-  }
-
-  getWebSockets() {
-    return [];
-  }
-}
-
-class MemoryBucket {
-  constructor() {
-    this.objects = new Map();
-  }
-
-  async put(key, body, options = {}) {
-    const bytes = new Uint8Array(await new Response(body).arrayBuffer());
-    this.objects.set(key, {
-      bytes,
-      httpMetadata: options.httpMetadata || {},
-      customMetadata: options.customMetadata || {},
-    });
-  }
-
-  async get(key) {
-    const stored = this.objects.get(key);
-    if (!stored) return null;
-    return {
-      body: stored.bytes,
-      size: stored.bytes.byteLength,
-      httpMetadata: stored.httpMetadata,
-      customMetadata: stored.customMetadata,
-      writeHttpMetadata(headers) {
-        if (stored.httpMetadata.contentType) {
-          headers.set("content-type", stored.httpMetadata.contentType);
-        }
-      },
-    };
-  }
-}
-
-function actorRequest(path, userId, displayName, body) {
-  return new Request(`https://overflow.internal${path}`, {
-    method: body === undefined ? "GET" : "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-overflow-user-id": userId,
-      "x-overflow-display-name": displayName,
-      "x-overflow-email": `${userId}@example.com`,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-}
-
-async function remote(pool, path, userId, displayName, body) {
-  const request = actorRequest(path, userId, displayName, body);
-  return pool.handleRemote(request, new URL(request.url));
-}
-
-test("account initialization issues 1,000 credits exactly once", async () => {
+test("account initialization issues 10,000 credits exactly once", async () => {
   const state = new MemoryState();
   const pool = new Pool(state, {});
   await state.ready;
   const first = await (await remote(pool, "/rpc/account-init", "member-1", "Kushal", {})).json();
   const second = await (await remote(pool, "/rpc/account-init", "member-1", "Kushal", {})).json();
-  expect(first.account).toMatchObject({ balance: 1000, reserved: 0, earned: 0, spent: 0 });
-  expect(second.account).toMatchObject({ balance: 1000, reserved: 0, earned: 0, spent: 0 });
+  expect(first.account).toMatchObject({ balance: 10000, reserved: 0, earned: 0, spent: 0 });
+  expect(second.account).toMatchObject({ balance: 10000, reserved: 0, earned: 0, spent: 0 });
   const activity = await (await pool.fetch(new Request("https://overflow.internal/api/activity"))).json();
   expect(activity.totals.accounts).toBe(1);
   expect(activity.events.filter((event) => event.type === "joined")).toHaveLength(1);
@@ -131,7 +33,7 @@ test("remote requester, worker, and result complete one durable round trip", asy
   const submitted = await submittedResponse.json();
   expect(submitted.batch).toMatch(/^[0-9a-f-]{36}$/);
   expect(submitted.jobs).toHaveLength(1);
-  expect(submitted).toMatchObject({ creditsReserved: 100, balance: 900, reserved: 100 });
+  expect(submitted).toMatchObject({ creditsReserved: 100, balance: 9900, reserved: 100 });
 
   // A legacy websocket worker cannot steal an OAuth-backed queued job.
   expect(pool.takeNextJob()).toBeNull();
@@ -185,24 +87,24 @@ test("remote requester, worker, and result complete one durable round trip", asy
   expect(returnResponse.status).toBe(200);
   expect(await returnResponse.json()).toMatchObject({
     creditsEarned: 100,
-    workerBalance: 1100,
-    requesterBalance: 900,
+    workerBalance: 10100,
+    requesterBalance: 9900,
     requesterReserved: 0,
   });
 
   const requesterAccount = await (await remote(pool, "/rpc/account", "requester-1", "Kushal")).json();
-  expect(requesterAccount.account).toMatchObject({ balance: 900, reserved: 0, spent: 100 });
+  expect(requesterAccount.account).toMatchObject({ balance: 9900, reserved: 0, spent: 100 });
   const workerAccount = await (await remote(pool, "/rpc/account", "worker-1", "Aparna")).json();
-  expect(workerAccount.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
+  expect(workerAccount.account).toMatchObject({ balance: 10100, earned: 100, completed: 1 });
   const repeatedReturn = await remote(pool, "/rpc/return", "worker-1", "Aparna", {
     jobId: claimed.id,
     artifact: "The sourced memo.",
     status: "completed",
     files: [],
   });
-  expect(await repeatedReturn.json()).toMatchObject({ alreadyStored: true, creditsEarned: 0, workerBalance: 1100 });
+  expect(await repeatedReturn.json()).toMatchObject({ alreadyStored: true, creditsEarned: 0, workerBalance: 10100 });
   const workerAfterRepeat = await (await remote(pool, "/rpc/account", "worker-1", "Aparna")).json();
-  expect(workerAfterRepeat.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
+  expect(workerAfterRepeat.account).toMatchObject({ balance: 10100, earned: 100, completed: 1 });
 
   // The requester lost the original tool call and its batch UUID. OAuth
   // identity alone must recover every result and its actual file bytes.
@@ -275,6 +177,7 @@ test("public activity includes OAuth-backed queued and claimed work", async () =
   expect(activity.totals).toMatchObject({ accounts: 1, jobs: 1, queued: 1, claimed: 0 });
   expect(activity).not.toHaveProperty("credits");
   expect(activity).not.toHaveProperty("accounts");
+  expect(activity.members[0]).toMatchObject({ name: "Kushal", balance: 9900 });
   expect(activity.jobs[0]).toMatchObject({ requester: "Kushal", status: "queued", credits: 100 });
 
   await remote(pool, "/rpc/claim", "worker-1", "Aparna", {});
@@ -283,7 +186,7 @@ test("public activity includes OAuth-backed queued and claimed work", async () =
   expect(activity.jobs[0]).toMatchObject({ status: "claimed", worker: "Aparna" });
   expect(activity.jobs[0]).toMatchObject({ requester: "Kushal", worker: "Aparna" });
   const publicJson = JSON.stringify(activity);
-  for (const field of ["balance", "reserved", "earned", "spent", "refunded", "workerBalance", "requesterBalance"]) {
+  for (const field of ["reserved", "earned", "spent", "refunded", "workerBalance", "requesterBalance"]) {
     expect(publicJson).not.toContain(`"${field}":`);
   }
   expect(JSON.stringify(activity)).not.toContain("@example.com");
@@ -309,11 +212,11 @@ test("failed work refunds the requester and does not pay the worker", async () =
     status: "failed",
     files: [],
   });
-  expect(await failed.json()).toMatchObject({ creditsEarned: 0, requesterBalance: 1000, requesterReserved: 0 });
+  expect(await failed.json()).toMatchObject({ creditsEarned: 0, requesterBalance: 10000, requesterReserved: 0 });
   const requester = await (await remote(pool, "/rpc/account", "requester-1", "Kushal")).json();
-  expect(requester.account).toMatchObject({ balance: 1000, reserved: 0, spent: 0 });
+  expect(requester.account).toMatchObject({ balance: 10000, reserved: 0, spent: 0 });
   const worker = await (await remote(pool, "/rpc/account", "worker-1", "Aparna")).json();
-  expect(worker.account).toMatchObject({ balance: 1000, earned: 0, completed: 0 });
+  expect(worker.account).toMatchObject({ balance: 10000, earned: 0, completed: 0 });
 });
 
 test("delegation cannot reserve more credits than the requester owns", async () => {
@@ -326,7 +229,9 @@ test("delegation cannot reserve more credits than the requester owns", async () 
     expectedArtifact: "A result",
     acceptanceTest: "Done",
   };
-  expect((await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: Array(8).fill(order) })).status).toBe(200);
+  await remote(pool, "/rpc/account-init", "requester-1", "Kushal", {});
+  const account = await state.storage.get("account:requester-1");
+  await state.storage.put("account:requester-1", { ...account, balance: 250 });
   expect((await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: Array(2).fill(order) })).status).toBe(200);
   const overdraw = await remote(pool, "/rpc/submit", "requester-1", "Kushal", { orders: [order] });
   expect(overdraw.status).toBe(402);
@@ -451,9 +356,9 @@ test("three identities can claim different orders without crossing ownership", a
   const requester = await (await remote(pool, "/rpc/account", "requester-a", "Kushal")).json();
   const workerB = await (await remote(pool, "/rpc/account", "worker-b", "Yash")).json();
   const workerC = await (await remote(pool, "/rpc/account", "worker-c", "Aparna")).json();
-  expect(requester.account).toMatchObject({ balance: 800, reserved: 0, spent: 200 });
-  expect(workerB.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
-  expect(workerC.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
+  expect(requester.account).toMatchObject({ balance: 9800, reserved: 0, spent: 200 });
+  expect(workerB.account).toMatchObject({ balance: 10100, earned: 100, completed: 1 });
+  expect(workerC.account).toMatchObject({ balance: 10100, earned: 100, completed: 1 });
 });
 
 test("abandoned claims requeue once, then fail and refund without polling", async () => {
@@ -499,7 +404,7 @@ test("abandoned claims requeue once, then fail and refund without polling", asyn
   expect(inbox.batches[0].jobs[0]).toMatchObject({ status: "failed" });
   expect(inbox.batches[0].jobs[0].result.artifact).toContain("2 workers claimed it");
   const requester = await (await remote(pool, "/rpc/account", "requester-a", "Kushal")).json();
-  expect(requester.account).toMatchObject({ balance: 1000, reserved: 0, refunded: 100, spent: 0 });
+  expect(requester.account).toMatchObject({ balance: 10000, reserved: 0, refunded: 100, spent: 0 });
   expect(await state.storage.getAlarm()).toBeNull();
   expect(pool.queue).toHaveLength(0);
 
@@ -528,5 +433,5 @@ test("concurrent duplicate returns transfer credits exactly once", async () => {
   expect(returns.filter((result) => result.creditsEarned === 100)).toHaveLength(1);
   expect(returns.filter((result) => result.alreadyStored)).toHaveLength(1);
   const worker = await (await remote(pool, "/rpc/account", "worker-b", "Yash")).json();
-  expect(worker.account).toMatchObject({ balance: 1100, earned: 100, completed: 1 });
+  expect(worker.account).toMatchObject({ balance: 10100, earned: 100, completed: 1 });
 });

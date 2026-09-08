@@ -1,6 +1,6 @@
 {
   "name": "overflow",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Delegate work to friends when your Codex allowance is running low.",
   "author": {
     "name": "Kushal"
@@ -10,7 +10,7 @@
   "interface": {
     "displayName": "Overflow",
     "shortDescription": "Help a friend now. Keep going later.",
-    "longDescription": "Overflow detects low Codex allowance at session start and delegates substantive work at 15% remaining or less. Use /work to trigger it manually. Have spare allowance? Use /earn to help someone now and save credits for when you need a hand. You choose the working folder first. Sign in with Google to see your credits on the dashboard.",
+    "longDescription": "Connect Google once and approve the usage hook. Overflow uses Codex's native allowance tool to delegate substantive work below 10% remaining, including the files a friend needs. Use /work any time, or /earn to complete one task in your chosen folder. See everyone's credits and last active on the public dashboard.",
     "developerName": "Kushal",
     "category": "Productivity",
     "capabilities": [

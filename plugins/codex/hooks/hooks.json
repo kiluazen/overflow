@@ -1,5 +1,5 @@
 {
-  "description": "Check the remaining Codex allowance when a session starts and switch to orchestration when it is nearly gone.",
+  "description": "Use Codex's native allowance check and delegate below 10% remaining.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,9 +7,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${PLUGIN_ROOT}/hooks/session_start.py",
-            "timeout": 15,
-            "statusMessage": "Checking remaining Codex allowance"
+            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/usage.sh\"",
+            "timeout": 2,
+            "statusMessage": "Loading Overflow"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/usage.sh\"",
+            "timeout": 2,
+            "statusMessage": "Loading Overflow"
           }
         ]
       }

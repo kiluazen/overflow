@@ -138,6 +138,9 @@ async function main() {
       "overflow_pool",
       "overflow_prepare_upload",
       "overflow_return",
+      "overflow_touch",
+      "overflow_prepare_input_upload",
+      "overflow_inputs",
     ]) {
       if (!names.includes(required)) throw new Error(`missing MCP tool ${required}`);
     }
@@ -149,14 +152,23 @@ async function main() {
     const before = beforeBalance.structuredContent?.account;
     if (!before || !Number.isFinite(before.balance)) throw new Error("balance returned no account ledger");
 
+    const activity = await json(await fetch(`${BASE}/api/activity`));
+    if (activity.totals.queued || activity.totals.claimed) throw new Error("Run this self-test only while the pool is empty; it must not claim a friend's work");
+    const inputBytes = new TextEncoder().encode('Overflow requester input bytes passed');
+    const inputHash = crypto.createHash('sha256').update(inputBytes).digest('hex');
+    const input = (await mcp('tools/call', { name:'overflow_prepare_input_upload', arguments:{name:'requester-brief.txt',contentType:'text/plain',size:inputBytes.length,sha256:inputHash} })).structuredContent;
+    const uploadedInput = await fetch(input.uploadUrl,{method:'PUT',headers:{'content-length':String(inputBytes.length)},body:inputBytes});
+    if(uploadedInput.status!==201) throw new Error(`input upload failed: ${uploadedInput.status} ${await uploadedInput.text()}`);
+
     const delegated = await mcp("tools/call", {
       name: "overflow_delegate",
       arguments: {
         orders: [{
-          objective: "[E2E] Return the exact phrase Overflow round trip passed",
+          objective: "[Release 0.8.0 self-test] Exchange input and output files",
           context: "This is an automated production transport test.",
           expectedArtifact: "Plain text",
           acceptanceTest: "The artifact exactly matches the requested phrase.",
+          inputArtifactIds: [input.artifactId],
         }],
       },
     });
@@ -171,6 +183,11 @@ async function main() {
     });
     const jobId = claimed.structuredContent?.jobId;
     if (!jobId) throw new Error("claim returned no job ID");
+    if (claimed.structuredContent.order?.inputArtifactIds?.[0] !== input.artifactId) throw new Error('Another job arrived during this self-test; stop and review the claim');
+    const manifest=claimed.structuredContent.inputs;
+    if(manifest?.[0]?.sha256!==inputHash)throw new Error('input manifest checksum differs');
+    const receivedInput=await fetch(manifest[0].url);
+    if(!receivedInput.ok || !Buffer.from(await receivedInput.arrayBuffer()).equals(Buffer.from(inputBytes)))throw new Error('requester input bytes changed in transit');
 
     const prepared = await mcp("tools/call", {
       name: "overflow_prepare_upload",
@@ -232,7 +249,8 @@ async function main() {
     }
 
     console.log(`PASS authenticated MCP tools: ${names.join(", ")}`);
-    console.log("PASS delegate -> claim -> upload bytes -> return -> inbox recovery -> download bytes");
+    console.log("PASS input upload -> delegate -> claim -> input download -> output upload -> return -> inbox -> output download");
+    console.log(`PASS same-account ledger settled; batch ${batch}; this is transport proof, not a two-person trial`);
   } finally {
     server.close();
   }
