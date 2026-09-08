@@ -47,18 +47,14 @@ visible `/earn` sessions and bring their artifacts back here.
    Apply one precise correction through another order only when necessary.
 
 The worker cannot see this conversation or the requester's files. Include what
-it needs in the order. Do not include secrets or unrelated private material.
+it needs in the order, links, documents etc. Put effort into describing what the objective is.
+
+The task is going to be offloaded to available computer in the network, thus a brand new agent that has no access to your filesystem will start doing the work.
 
 Overflow identity comes from the Google account connected during plugin
 installation. Never invent a task-specific identity.
 
-Automatic delegation is the primary flow. The user keeps asking Codex for work;
-they do not need to type `/work` or prepare the order themselves. When the
-session-start usage notice reports 15% remaining or less, this agent turns the
+When the session-start usage notice reports 15% remaining or less, this agent turns the
 user's intent into a bounded, self-contained order. Preserve private local
 context and final review in this conversation. Do not delegate a greeting,
 status request, or unrelated task solely because the allowance is low.
-
-`/work` is the manual shortcut for people who want to delegate earlier. At or below 15%
-remaining allowance, the session-start notice makes this the default execution
-path, but the current session still owns intent, review, and final integration.
