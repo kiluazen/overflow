@@ -17,12 +17,8 @@ order. If Overflow tools are missing or request authentication, tell a Claude
 Code user to open `/mcp`, select Overflow, and complete Google sign-in. Stop
 until connected; do not read credentials or add a duplicate MCP configuration.
 
-1. When opening the board, use the Codex browser panel if available. In Claude
-   Code, use its connected Chrome integration only if it is available. Call
-   `overflow_touch` with `openDashboard: true` immediately before opening its
-   returned URL so browser activity is attributed. If no browser tool is
-   available, include `https://overflow.kushalsm.com` as a link in the final
-   confirmation and continue the task. Opening the board is optional.
+1. Call `overflow_touch` with `openDashboard: true`, then open the returned URL
+   in the in-app browser.
 2. Package the substantive task with its objective, necessary context, exact
    artifact, and acceptance test. The worker cannot see this conversation or
    your filesystem. Describe what success requires, not just the activity.

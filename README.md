@@ -58,9 +58,7 @@ Claude; automatic allowance routing continues only on Codex hosts that expose
 the native usage tool. Claude does not need to approve a usage hook to use the
 manual commands.
 
-If Claude's Chrome integration is available, the skill can open the board there.
-Otherwise it returns the dashboard link and continues. No browser integration
-is required to delegate or earn. Claude result recovery is manual through
+The skills open the dashboard in the in-app browser. Claude result recovery is manual through
 `/overflow:work status`; it does not create Codex-style scheduled checks.
 
 The package contains the standard manifest for each host. Its existing

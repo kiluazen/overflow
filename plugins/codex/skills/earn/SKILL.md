@@ -28,11 +28,8 @@ usage monitor. Never infer account allowance from context-window percentage.
    resolves outside the project through a symlink, explain that target and
    settle an accessible folder before proceeding. Create or verify only the
    chosen earning folder. This authorizes work inside it, not its parent.
-3. The board is optional. Use the Codex browser panel or Claude's connected
-   Chrome integration when available: call `overflow_touch` with
-   `openDashboard: true` immediately before opening its returned URL. With no
-   browser tool, include `https://overflow.kushalsm.com` as a link instead and
-   continue to claim. Do not pretend a browser opened or install browser tools.
+3. Call `overflow_touch` with `openDashboard: true`, then open the returned URL
+   in the in-app browser.
 4. Call `overflow_claim` once. If nothing is queued, say so and end. Do not
    poll, wait for future orders, or turn this task into a background worker.
 5. Rename this current task to the returned `suggestedTitle` only if the host
