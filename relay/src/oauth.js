@@ -172,7 +172,9 @@ export async function handleGoogleCallback(request, env) {
     browserHash: await tokenHash(setupSecret), expiresAt: Date.now() + CONSENT_TTL_SECONDS * 1000,
   }), { expirationTtl: CONSENT_TTL_SECONDS });
   const headers = new Headers({
-    "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer",
+    // HTML form POSTs under no-referrer send Origin: null. Send only the
+    // origin (never the Google callback query) so same-origin validation works.
+    "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "origin",
     "content-security-policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   });
   headers.append("set-cookie", browserCookie(`__Host-overflow-setup-${id}`, setupSecret, CONSENT_TTL_SECONDS));

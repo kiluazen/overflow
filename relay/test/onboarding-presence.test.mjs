@@ -40,6 +40,7 @@ test('Google login ends with the supplied hook guide before completing the origi
   const {response,html,id,cookie,start}=await googleFinish(env);
   expect(start.location.searchParams.get('scope')).toBe('openid email profile');
   expect(response.status).toBe(200);expect(html).toContain('Google connected');
+  expect(response.headers.get('referrer-policy')).toBe('origin');
   expect(html).toContain('/setup-hooks-v1.png');expect(html).toContain('less than 10%');
   expect(env.OAUTH_PROVIDER.completeAuthorization).not.toHaveBeenCalled();
   const returned=await complete(env,id,cookie);
