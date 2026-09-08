@@ -24,3 +24,16 @@
 Deployment and production evidence are appended after the release checks. The next real friend trial must distinguish connected, hook exercised, requested, and earned. Discord membership and a same-account transport self-test do not prove a two-person exchange.
 
 Model enforcement, token-priced credits, automatic background earning, and output-quality adjudication remain deferred. The existing requester schedule still ends after 60 minutes, while a claim can last 90 minutes; private inbox recovery remains available afterward.
+
+## Production and installation results
+
+- Code released on `main`: `93b3dbf06865b833eef5803136de868d29b5e286`.
+- Cloudflare deployment: `1e68e1f6-4e22-47ca-b074-96ce5e910ed9`. Both `overflow.kushalsm.com` and `overflow-relay.kushalsokke.workers.dev` return 200.
+- The deployed dashboard matches the source, allowing only bundler whitespace changes in the embedded sorting function. Browser DOM verification: zero controls, one real member, eight existing tasks, no horizontal overflow.
+- The existing account migrated to 10,000 available credits. Its picture remains an initials fallback until a fresh Google connection supplies the profile photo. No fake members or test jobs were added during this release check.
+- Unauthenticated MCP returns 401; removed dashboard account endpoint returns 404; OAuth discovery and the hook screenshot return 200.
+- Refreshed the public Overflow marketplace and successfully installed 0.8.0 through `codex plugin add overflow@overflow --json`. Manifest, MCP declaration, hook config/script, and both skills match the release bytes. Installation did not prove native hook trust or complete OAuth.
+- Real browser Google onboarding reached the existing account and then required a passkey. The user was asked to complete that Google identity check. The authenticated production input/output exchange remains **pending**, not passed. The test script checks that the pool is idle first and labels any resulting job as a release self-test.
+- Automated native Codex settings inspection is unavailable in this environment. No hook trust controls were bypassed. Fresh desktop-task hook execution and a second machine remain **unverified**.
+
+Confidence: **high** in the deployed dashboard, migration, packaging, and automated server checks; **moderate** in end-to-end host readiness until the pending connection and friend trial are completed.
