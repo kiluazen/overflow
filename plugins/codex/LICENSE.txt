@@ -1,0 +1,17 @@
+Overflow Plugin License
+Copyright 2026 Kushal. All rights reserved.
+
+The Overflow plugin is proprietary software. You may inspect its published
+source and install, copy, and run the unmodified plugin for personal or business
+use with the Overflow service. Authorized plugin marketplaces may copy and
+distribute the unmodified plugin for installation and review, retaining this
+license notice.
+
+No permission is granted to relicense the plugin, distribute modified versions,
+or operate a competing hosted service using Overflow code. Rights granted by
+applicable law or a separate written agreement remain unaffected. Third-party
+components retain their own licenses.
+
+The hosted service is governed by https://overflow.kushalsm.com/terms.
+Privacy information: https://overflow.kushalsm.com/privacy.
+Contact: kushalsm@autark.sh.

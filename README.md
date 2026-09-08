@@ -171,3 +171,10 @@ relay/src/input-attachments.js        private requester input files
 relay/test/                           Workers-runtime queue tests
 test-support/                         marketplace install smoke test
 ```
+
+## Policies and license
+
+[Privacy](https://overflow.kushalsm.com/privacy) · [Terms](https://overflow.kushalsm.com/terms) · [Support](mailto:kushalsm@autark.sh)
+
+The plugin uses a proprietary license with permission to install and use the
+unmodified plugin with Overflow. See [the plugin license](plugins/codex/LICENSE.txt).

@@ -45,6 +45,20 @@ async function legacySetup(env){
 }
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks()});
 
+test('legal pages are public without opening protected account routes',async()=>{
+  for (const path of ['/privacy','/privacy/','/terms','/terms/']) {
+    const response=await defaultHandler.fetch(req(path),{});
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(await response.text()).toContain('kushalsm@autark.sh');
+  }
+  const head=await defaultHandler.fetch(req('/privacy',{method:'HEAD'}),{});
+  expect(head.status).toBe(200);expect(await head.text()).toBe('');
+  expect((await defaultHandler.fetch(req('/terms',{method:'POST'}),{})).status).toBe(405);
+  expect((await defaultHandler.fetch(req('/status'),{})).status).toBe(401);
+});
+
 test('Google login immediately completes the original OAuth handoff without a return-button click',async()=>{
   const {env,pool,values}=await setup();
   const {response,html,start}=await googleFinish(env);
@@ -121,7 +135,8 @@ test('dashboard has no account login routes and remains readable without a cooki
   const {env}=await setup();
   const board=await defaultHandler.fetch(req('/'),env);
   expect(board.status).toBe(200);
-  const html=await board.text();expect(html).not.toMatch(/<form|<select|<summary|<a\s/i);
+  const html=await board.text();expect(html).not.toMatch(/<form|<select|<summary/i);
+  expect([...html.matchAll(/<a\s+href="([^"]+)"/g)].map(match=>match[1])).toEqual(['/privacy','/terms','mailto:kushalsm@autark.sh']);
   expect(html).toContain('id="task-dialog"');expect(html).toContain('href="/favicon.svg"');
   expect(html).not.toContain('Sign in');expect(html).not.toContain('100 credits');
   expect((await defaultHandler.fetch(req('/auth/dashboard/start'),env)).headers.get('location')).toBe(BASE+'/');

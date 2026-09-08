@@ -1,5 +1,6 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { BOARD_HTML } from "./board.js";
+import { legalResponse } from "./legal.js";
 import { compareJobs } from "./board-model.js";
 import { BG_JPEG_BASE64 } from "./bg.js";
 import { SHORELINE_JPEG_BASE64 } from "./shoreline.js";
@@ -94,6 +95,8 @@ async function poolIdentity(token, env, requestedName) {
 
 export const defaultHandler = {
   async fetch(request, env) {
+    const legal = legalResponse(request);
+    if (legal) return legal;
     const url = new URL(request.url);
     const token = url.searchParams.get("token") || "";
 

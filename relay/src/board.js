@@ -16,6 +16,7 @@ export const BOARD_HTML = String.raw`<!doctype html>
 <style>
 :root{color-scheme:light;--paper:#f5f5ef;--ink:#29342f;--muted:#697269;--sea:#376451;--line:#d9dfd5}
 *{box-sizing:border-box}body{margin:0;min-height:100svh;color:var(--ink);background:var(--paper);font:14px/1.5 Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.legal-links{display:flex;gap:18px;margin-top:32px;font-size:11px}.legal-links a{color:var(--muted);text-underline-offset:3px}
 .shell{width:min(1030px,calc(100% - 64px));margin:auto;padding-bottom:180px}
 header{height:88px;display:flex;align-items:center;border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:10px;font-size:23px;font-weight:500;letter-spacing:-1px}.brand svg{width:25px;height:25px;fill:none;stroke:var(--sea);stroke-width:1.7;stroke-linecap:round}
@@ -43,6 +44,7 @@ h1{font:inherit;margin:0}h2{font-size:12px;font-weight:500;color:var(--muted);ma
 <section class="work" aria-labelledby="work-title"><h2 id="work-title">Tasks</h2><ul class="jobs" id="jobs" aria-busy="true"></ul><p class="empty" id="jobs-empty" hidden>No tasks yet.</p></section>
 <p class="error" id="error" role="status" hidden></p>
 </main>
+<footer class="legal-links"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="mailto:kushalsm@autark.sh">Contact</a></footer>
 </div>
 <dialog class="dialog" id="task-dialog" aria-labelledby="dialog-title"><div class="dialog-shell"><div class="dialog-head"><p class="dialog-kicker">Task details</p><button class="dialog-close" id="dialog-close" type="button" aria-label="Close task details">×</button></div><div class="dialog-body" id="dialog-body"></div></div></dialog>
 <script>
