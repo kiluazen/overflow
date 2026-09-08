@@ -5,9 +5,9 @@
 Overflow shares spare AI allowance between people. Keep talking to Codex as
 usual: when the native usage check reports less than 10% remaining, the agent packages
 substantive work and delegates it. You do not need to write a separate order.
-`/work` is the manual shortcut for people who want to delegate earlier.
+`overflow work` is the manual shortcut for people who want to delegate earlier.
 
-Have spare allowance today? `/earn` takes one task into your current, visible
+Have spare allowance today? `overflow earn` takes one task into your current, visible
 Codex conversation. Help someone now, keep the credits for when you need work
 next week.
 
@@ -16,7 +16,11 @@ Every Google account starts with 10,000 credits. Delegating one order reserves
 refunds the requester.
 
 The single hook runs when you submit a prompt. Exactly 10% stays
-local. Missing usage data leaves normal work available; `/work` still works.
+local. Missing usage data leaves normal work available; `overflow work` still works.
+
+Select the **overflow** skill to send work, earn credits, or check your work.
+If you select it without a request, it offers those three choices. The previous
+standalone work and earn skills are now flows inside Overflow.
 
 ## Install
 
@@ -29,7 +33,7 @@ The hook uses the system shell to give the current agent instructions. The
 agent reads the host's native `get_usage_limits` tool. No Python, Node, separate
 Codex CLI, local MCP server, or background process is needed for this check.
 This requires the Codex desktop host to expose that native tool; an unsupported
-host keeps manual `/work` and `/earn` available. A long-running turn catches
+host keeps manual `overflow work` and `overflow earn` available. A long-running turn catches
 changes on the next user prompt, rather than continuously monitoring usage.
 
 ## Claude Code
@@ -44,8 +48,8 @@ Install the same public plugin through Claude Code:
 ```
 
 In `/mcp`, select Overflow and complete Google sign-in. Use
-`/overflow:work <task>` to delegate, `/overflow:work status` to retrieve work,
-and `/overflow:earn` to take one queued task. Use the same Google account to
+`/overflow:overflow work <task>` to delegate, `/overflow:overflow status` to retrieve work,
+and `/overflow:overflow earn` to take one queued task. Use the same Google account to
 keep the same credits and inbox across Codex and Claude Code.
 
 Claude Code uses manual commands. There is no local server, usage cache,
@@ -57,7 +61,7 @@ manual commands.
 If Claude's Chrome integration is available, the skill can open the board there.
 Otherwise it returns the dashboard link and continues. No browser integration
 is required to delegate or earn. Claude result recovery is manual through
-`/overflow:work status`; it does not create Codex-style scheduled checks.
+`/overflow:overflow status`; it does not create Codex-style scheduled checks.
 
 The package contains the standard manifest for each host. Its existing
 `plugins/codex` source path is retained so current marketplace installs keep
@@ -71,7 +75,7 @@ support is not established by this local Claude Code release.
 requester’s visible Codex task
   → low-allowance detection → agent prepares order → durable Overflow queue
   → task sleeps; Codex heartbeat checks at 20, 40, and 60 minutes
-  → friend’s visible Codex task → /earn
+  → friend’s visible Codex task → overflow earn
   → worker performs the task on screen → overflow_return
   → requester’s private Overflow inbox receives the artifact
 ```
@@ -80,7 +84,7 @@ The remote MCP connection identifies both sides using the Google account they
 connected during installation. A worker task is renamed to
 `Earn Overflow: <short id> <objective>` after it claims work.
 
-Automatic delegation (or the manual `/work` shortcut) makes one short delegation call, stores the batch durably, and, when supported by the host, creates a
+Automatic delegation (or the manual `overflow work` shortcut) makes one short delegation call, stores the batch durably, and, when supported by the host, creates a
 finite Codex task heartbeat. The original turn ends after scheduling succeeds or reports its absence. Codex wakes
 the same task after 20 minutes, checks that batch once, and repeats at 40 and 60
 minutes only while needed. There is no model activity between those checks. A
@@ -88,7 +92,7 @@ completed heartbeat returns the artifact in the original task and deletes
 itself. `overflow_inbox` remains the manual recovery path even if the original
 task or batch ID was lost.
 
-`/earn` claims exactly one currently queued order. It never starts `codex exec`,
+`overflow earn` claims exactly one currently queued order. It never starts `codex exec`,
 a hidden child, another task, or a subagent. If the pool is empty, it says so
 and ends without polling. Its first action is a folder choice: use
 `<current project>/overflow-earn` (recommended), or choose another folder.
@@ -115,7 +119,7 @@ of the requester's conversation and filesystem do not travel automatically.
 
 ## Architecture
 
-- Plugin: two shared skills, native Codex and Claude manifests, Codex usage hooks, and one remote MCP declaration.
+- Plugin: one shared Overflow skill with work, earn, and status flows, native Codex and Claude manifests, Codex usage hooks, and one remote MCP declaration.
 - Wake-up: a finite Codex heartbeat attached to the requesting task; no local
   daemon, listener, or relay.
 - Identity: OAuth 2.1 to Overflow, with Google sign-in upstream.
@@ -157,8 +161,8 @@ The production Worker requires `GOOGLE_CLIENT_ID` and
 
 ```text
 plugins/codex/hooks/usage.sh          native usage policy instructions
-plugins/codex/skills/work/SKILL.md    requester behavior
-plugins/codex/skills/earn/SKILL.md    visible worker behavior
+plugins/codex/skills/overflow/SKILL.md       one discoverable entry point
+plugins/codex/skills/overflow/references/    requester and worker flows
 plugins/codex/.mcp.json               remote authenticated MCP
 relay/src/mcp.js                      pool tools
 relay/src/oauth.js                    OAuth and Google sign-in
