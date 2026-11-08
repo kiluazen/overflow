@@ -55,7 +55,16 @@ export async function handleAuthorize(request, env) {
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter(Boolean);
   if (segments.length === 1) {
-    const parsed = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+    let parsed;
+    try {
+      parsed = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+    } catch (error) {
+      // Unknown client_id or a redirect it never registered. The library throws,
+      // which used to surface as a bare 500. RFC 6749 4.1.2.1: don't redirect,
+      // tell the person. Logged so a vanished client shows up in Workers logs.
+      console.error("authorize rejected", url.searchParams.get("client_id"), error?.message);
+      return errorHtml("This connection request isn't valid. Return to your app and connect again.");
+    }
     const info = parsed.clientId ? await env.OAUTH_PROVIDER.lookupClient(parsed.clientId) : null;
     const nonce = crypto.randomUUID();
     await env.OAUTH_KV.put(
