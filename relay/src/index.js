@@ -1445,6 +1445,11 @@ export default new OAuthProvider({
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",
   clientRegistrationEndpoint: "/register",
+  // Registered clients never expire. The library default (90 days) expires
+  // ChatGPT's one shared client and breaks every new connect (Nexus,
+  // 2026-11-07). Must stay explicitly undefined; test/oauth-client-expiry.test.mjs
+  // guards it.
+  clientRegistrationTTL: undefined,
   scopesSupported: ["openid", "profile", "email", "overflow:connect"],
   allowPlainPKCE: false,
   resourceMetadata: {
